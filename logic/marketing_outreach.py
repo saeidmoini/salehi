@@ -142,14 +142,14 @@ class MarketingScenario(BaseScenario):
                     bridge_id=session.bridge.bridge_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=1,
+                    max_silence=3,
                 )
             else:
                 self.ari_client.record_channel(
                     channel_id=channel_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=1,
+                    max_silence=3,
                 )
             self.session_manager.register_recording(session.session_id, recording_name)
         except Exception as exc:
@@ -161,6 +161,9 @@ class MarketingScenario(BaseScenario):
         phase = session.metadata.get("recording_phase")
         if not phase or session.metadata.get("recording_name") != recording_name:
             return
+        if recording_name in session.processed_recordings:
+            return
+        session.processed_recordings.add(recording_name)
         on_yes, on_no = self._callbacks_for_phase(phase)
         thread = threading.Thread(
             target=self._transcribe_response,
@@ -173,6 +176,9 @@ class MarketingScenario(BaseScenario):
         phase = session.metadata.get("recording_phase")
         if not phase or session.metadata.get("recording_name") != recording_name:
             return
+        if recording_name in session.processed_recordings:
+            return
+        session.processed_recordings.add(recording_name)
         on_yes, on_no = self._callbacks_for_phase(phase)
         logger.warning(
             "Recording failed (phase=%s) for session %s cause=%s", phase, session.session_id, cause
@@ -189,8 +195,8 @@ class MarketingScenario(BaseScenario):
     ) -> None:
         time.sleep(0.5)
         try:
-            audio_bytes = self.ari_client.fetch_stored_recording(recording_name)
             self._play_processing(session)
+            audio_bytes = self.ari_client.fetch_stored_recording(recording_name)
             stt_result: STTResult = transcribe_audio(audio_bytes, self.settings.vira)
             transcript = stt_result.text.strip()
             logger.info(

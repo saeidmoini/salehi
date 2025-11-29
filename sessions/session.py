@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 
 class LegDirection(str, Enum):
@@ -53,6 +53,7 @@ class Session:
     playbacks: Dict[str, str] = field(default_factory=dict)
     responses: List[Dict[str, str]] = field(default_factory=list)
     result: Optional[str] = None
+    processed_recordings: Set[str] = field(default_factory=set)
 
     def add_channel(self, channel_id: str) -> None:
         if not self.bridge:
