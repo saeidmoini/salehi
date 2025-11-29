@@ -89,6 +89,7 @@ class SessionManager:
     def _handle_stasis_start(self, event: dict) -> None:
         channel = event.get("channel", {})
         channel_id = channel.get("id")
+        channel_state = channel.get("state")
         args = event.get("args", [])
         direction = self._detect_direction(args)
 
@@ -109,6 +110,7 @@ class SessionManager:
             self._ensure_bridge(session)
             if session.bridge and channel_id:
                 self.ari_client.add_channel_to_bridge(session.bridge.bridge_id, channel_id)
+            self._maybe_mark_answered(session, session.outbound_leg, channel_state)
             self.scenario_handler.on_outbound_channel_created(session)
             logger.info(
                 "Outbound channel %s joined session %s", channel_id, session.session_id
@@ -131,6 +133,7 @@ class SessionManager:
             self._ensure_bridge(session)
             if session.bridge and channel_id:
                 self.ari_client.add_channel_to_bridge(session.bridge.bridge_id, channel_id)
+            self._maybe_mark_answered(session, session.operator_leg, channel_state)
             if hasattr(self.scenario_handler, "on_operator_channel_created"):
                 self.scenario_handler.on_operator_channel_created(session)
             logger.info(
@@ -152,6 +155,7 @@ class SessionManager:
             self._ensure_bridge(session)
             if session.bridge and channel_id:
                 self.ari_client.add_channel_to_bridge(session.bridge.bridge_id, channel_id)
+            self._maybe_mark_answered(session, session.inbound_leg, channel_state)
             self.scenario_handler.on_inbound_channel_created(session)
             logger.info("Inbound channel %s created session %s", channel_id, session_id)
 
@@ -271,3 +275,9 @@ class SessionManager:
             if leg and leg.channel_id == channel_id:
                 return leg
         return None
+
+    def _maybe_mark_answered(self, session: Session, leg: CallLeg, channel_state: Optional[str]) -> None:
+        if channel_state == "Up":
+            leg.state = LegState.ANSWERED
+            session.status = SessionStatus.ACTIVE
+            self.scenario_handler.on_call_answered(session, leg)

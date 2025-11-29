@@ -11,6 +11,7 @@ Outbound, ARI-driven call-control engine for a language academy marketing campai
 
 ## Quick Start
 1. Install Python 3.12.
+2. Install system dependency `ffmpeg` (for prompt conversion): e.g. `sudo apt-get update && sudo apt-get install -y ffmpeg`.
 2. Create a venv: `python -m venv venv && source venv/bin/activate`
 3. Install deps: `pip install -r requirements.txt`
 4. Copy `.env.example` to `.env` and fill in ARI, trunk, and token details.
