@@ -28,8 +28,9 @@ def main() -> None:
 
     ari_client = AriClient(settings.ari)
     llm_client = GapGPTClient(settings.gapgpt)
-    scenario = MarketingScenario(settings, ari_client, llm_client)
-    session_manager = SessionManager(ari_client, scenario)
+    session_manager = SessionManager(ari_client, None)  # placeholder to allow scenario access
+    scenario = MarketingScenario(settings, ari_client, llm_client, session_manager)
+    session_manager.scenario_handler = scenario
     dialer = Dialer(settings, ari_client, session_manager)
     scenario.attach_dialer(dialer)
 

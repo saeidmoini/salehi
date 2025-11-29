@@ -8,6 +8,7 @@ from core.ari_client import AriClient
 from llm.client import GapGPTClient
 from logic.base import BaseScenario
 from sessions.session import CallLeg, LegDirection, Session
+from sessions.session_manager import SessionManager
 from stt_tts.vira_stt import STTResult, transcribe_audio
 
 
@@ -23,16 +24,24 @@ class MarketingScenario(BaseScenario):
     4) After bridge, let operator/caller hang up; then report status.
     """
 
-    def __init__(self, settings: Settings, ari_client: AriClient, llm_client: GapGPTClient):
+    def __init__(
+        self,
+        settings: Settings,
+        ari_client: AriClient,
+        llm_client: GapGPTClient,
+        session_manager: SessionManager,
+    ):
         self.settings = settings
         self.ari_client = ari_client
         self.llm_client = llm_client
+        self.session_manager = session_manager
         self.dialer = None
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
         self.prompt_media = {
             "hello": "sound:custom/hello",
             "goodby": "sound:custom/goodby",
             "second": "sound:custom/second",
+            "processing": "sound:beep",
         }
 
     def attach_dialer(self, dialer) -> None:
@@ -98,6 +107,7 @@ class MarketingScenario(BaseScenario):
         playback_id = playback.get("id")
         if playback_id:
             session.playbacks[playback_id] = prompt_key
+            self.session_manager.register_playback(session.session_id, playback_id)
         logger.info("Playing prompt %s on channel %s", prompt_key, channel_id)
 
     def _customer_channel_id(self, session: Session) -> Optional[str]:
@@ -126,12 +136,12 @@ class MarketingScenario(BaseScenario):
             self.ari_client.record_channel(
                 channel_id=channel_id,
                 name=recording_name,
-                max_duration=6,
-                max_silence=2,
+                max_duration=10,
+                max_silence=1,
             )
         except Exception as exc:
             logger.exception("Failed to start recording (%s) for session %s: %s", phase, session.session_id, exc)
-            self._handle_no_response(session, attempts_key, phase, on_yes, on_no, reason="recording_failed")
+            self._handle_no_response(session, phase, on_yes, on_no, reason="recording_failed")
             return
 
         thread = threading.Thread(
@@ -152,6 +162,7 @@ class MarketingScenario(BaseScenario):
         time.sleep(7)
         try:
             audio_bytes = self.ari_client.fetch_stored_recording(recording_name)
+            self._play_processing(session)
             stt_result: STTResult = transcribe_audio(audio_bytes, self.settings.vira)
             transcript = stt_result.text.strip()
             logger.info(
@@ -267,6 +278,19 @@ class MarketingScenario(BaseScenario):
             session.result = "failed:operator_failed"
             logger.exception("Operator originate failed for session %s: %s", session.session_id, exc)
             self._play_prompt(session, "goodby")
+
+    def _play_processing(self, session: Session) -> None:
+        """
+        Play a quick acknowledgement (beep) to signal we are analyzing.
+        """
+        channel_id = self._customer_channel_id(session)
+        if not channel_id:
+            return
+        playback = self.ari_client.play_on_channel(channel_id, self.prompt_media["processing"])
+        playback_id = playback.get("id")
+        if playback_id:
+            session.playbacks[playback_id] = "processing"
+            self.session_manager.register_playback(session.session_id, playback_id)
 
     # Result reporting ----------------------------------------------------
     def _report_result(self, session: Session) -> None:

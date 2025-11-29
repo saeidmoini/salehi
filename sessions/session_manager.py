@@ -27,6 +27,7 @@ class SessionManager:
         self.scenario_handler = scenario_handler
         self.sessions: Dict[str, Session] = {}
         self.channel_to_session: Dict[str, str] = {}
+        self.playback_to_session: Dict[str, str] = {}
         self.lock = threading.Lock()
 
     def create_outbound_session(
@@ -69,6 +70,8 @@ class SessionManager:
             self._handle_hangup(event)
         elif event_type == "ChannelDestroyed":
             self._handle_channel_destroyed(event)
+        elif event_type == "PlaybackStarted":
+            self._handle_playback_started(event)
         elif event_type == "PlaybackFinished":
             self._handle_playback_finished(event)
         elif event_type == "StasisEnd":
@@ -216,10 +219,25 @@ class SessionManager:
         playback_id = playback.get("id")
         channel = event.get("channel", {})
         channel_id = channel.get("id")
-        session = self._get_session_by_channel(channel_id)
+        session = self._get_session_by_channel(channel_id) if channel_id else None
+        if not session and playback_id:
+            session = self._get_session_by_playback(playback_id)
         if not session:
             return
         self.scenario_handler.on_playback_finished(session, playback_id)
+
+    def _handle_playback_started(self, event: dict) -> None:
+        # No-op but avoids noisy "Unhandled event" logs.
+        playback = event.get("playback", {})
+        playback_id = playback.get("id")
+        channel = event.get("channel", {})
+        channel_id = channel.get("id")
+        if playback_id and channel_id:
+            with self.lock:
+                if playback_id not in self.playback_to_session:
+                    session_id = self.channel_to_session.get(channel_id)
+                    if session_id:
+                        self.playback_to_session[playback_id] = session_id
 
     def _handle_stasis_end(self, event: dict) -> None:
         channel = event.get("channel", {})
@@ -281,3 +299,14 @@ class SessionManager:
             leg.state = LegState.ANSWERED
             session.status = SessionStatus.ACTIVE
             self.scenario_handler.on_call_answered(session, leg)
+
+    def register_playback(self, session_id: str, playback_id: str) -> None:
+        with self.lock:
+            self.playback_to_session[playback_id] = session_id
+
+    def _get_session_by_playback(self, playback_id: str) -> Optional[Session]:
+        with self.lock:
+            session_id = self.playback_to_session.get(playback_id)
+        if session_id:
+            return self.get_session(session_id)
+        return None
