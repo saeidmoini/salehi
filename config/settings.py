@@ -156,7 +156,7 @@ def get_settings() -> Settings:
     audio = AudioSettings(
         src_dir=os.getenv("AUDIO_SRC_DIR", "assets/audio/src"),
         wav_dir=os.getenv("AUDIO_WAV_DIR", "assets/audio/wav"),
-        ast_sound_dir=os.getenv("AST_SOUND_DIR", "/var/lib/asterisk/sounds/custom"),
+        ast_sound_dir=os.getenv("AST_SOUND_DIR", "/var/lib/asterisk/sounds/en/custom"),
     )
 
     log_level = os.getenv("LOG_LEVEL", "INFO")

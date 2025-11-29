@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 def ensure_audio_assets(settings: AudioSettings) -> None:
     """
     Convert any mp3 files under src_dir to 16k mono WAV under wav_dir
-    and copy wav files into the Asterisk sounds directory.
+    and copy wav files into the Asterisk sounds directory (and language
+    subdir if present).
     """
     src_dir = Path(settings.src_dir)
     wav_dir = Path(settings.wav_dir)
@@ -56,11 +57,19 @@ def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
 
 
 def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:
+    targets = [ast_dir]
+    # If the target is .../custom and an /en/custom sibling exists or is creatable, sync there too.
+    if ast_dir.name == "custom":
+        lang_dir = ast_dir.parent / "en" / "custom"
+        targets.append(lang_dir)
+
     for wav_path in wav_dir.glob("*.wav"):
-        target = ast_dir / wav_path.name
-        try:
-            shutil.copy2(wav_path, target)
-            os.chmod(target, 0o644)
-            logger.info("Synced prompt %s to %s", wav_path.name, target)
-        except Exception as exc:
-            logger.warning("Failed to copy %s to %s: %s", wav_path, target, exc)
+        for target_dir in targets:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / wav_path.name
+            try:
+                shutil.copy2(wav_path, target)
+                os.chmod(target, 0o644)
+                logger.info("Synced prompt %s to %s", wav_path.name, target)
+            except Exception as exc:
+                logger.warning("Failed to copy %s to %s: %s", wav_path, target, exc)
