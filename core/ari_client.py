@@ -151,3 +151,21 @@ class AriClient:
         response = self.session.get(url, timeout=15)
         response.raise_for_status()
         return response.content
+
+    def record_bridge(
+        self,
+        bridge_id: str,
+        name: str,
+        max_duration: int = 10,
+        max_silence: int = 1,
+        fmt: str = "wav",
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "name": name,
+            "format": fmt,
+            "maxDurationSeconds": max_duration,
+            "maxSilenceSeconds": max_silence,
+            "ifExists": "overwrite",
+            "beep": "false",
+        }
+        return self._request("POST", f"/bridges/{bridge_id}/record", params=params)

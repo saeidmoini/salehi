@@ -28,6 +28,7 @@ class SessionManager:
         self.sessions: Dict[str, Session] = {}
         self.channel_to_session: Dict[str, str] = {}
         self.playback_to_session: Dict[str, str] = {}
+        self.recording_to_session: Dict[str, str] = {}
         self.lock = threading.Lock()
 
     def create_outbound_session(
@@ -315,12 +316,25 @@ class SessionManager:
             return self.get_session(session_id)
         return None
 
+    def register_recording(self, session_id: str, recording_name: str) -> None:
+        with self.lock:
+            self.recording_to_session[recording_name] = session_id
+
+    def _get_session_by_recording(self, recording_name: str) -> Optional[Session]:
+        with self.lock:
+            session_id = self.recording_to_session.get(recording_name)
+        if session_id:
+            return self.get_session(session_id)
+        return None
+
     def _handle_recording_finished(self, event: dict) -> None:
         recording = event.get("recording", {})
         recording_name = recording.get("name")
         channel = event.get("channel", {})
         channel_id = channel.get("id")
-        session = self._get_session_by_channel(channel_id)
+        session = self._get_session_by_channel(channel_id) if channel_id else None
+        if not session and recording_name:
+            session = self._get_session_by_recording(recording_name)
         if session and hasattr(self.scenario_handler, "on_recording_finished"):
             self.scenario_handler.on_recording_finished(session, recording_name)
 
@@ -330,6 +344,8 @@ class SessionManager:
         cause = recording.get("cause", "unknown")
         channel = event.get("channel", {})
         channel_id = channel.get("id")
-        session = self._get_session_by_channel(channel_id)
+        session = self._get_session_by_channel(channel_id) if channel_id else None
+        if not session and recording_name:
+            session = self._get_session_by_recording(recording_name)
         if session and hasattr(self.scenario_handler, "on_recording_failed"):
             self.scenario_handler.on_recording_failed(session, recording_name, cause)

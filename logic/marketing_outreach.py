@@ -137,12 +137,21 @@ class MarketingScenario(BaseScenario):
         session.metadata["recording_name"] = recording_name
         logger.info("Recording %s response for session %s", phase, session.session_id)
         try:
-            self.ari_client.record_channel(
-                channel_id=channel_id,
-                name=recording_name,
-                max_duration=10,
-                max_silence=1,
-            )
+            if session.bridge and session.bridge.bridge_id:
+                self.ari_client.record_bridge(
+                    bridge_id=session.bridge.bridge_id,
+                    name=recording_name,
+                    max_duration=10,
+                    max_silence=1,
+                )
+            else:
+                self.ari_client.record_channel(
+                    channel_id=channel_id,
+                    name=recording_name,
+                    max_duration=10,
+                    max_silence=1,
+                )
+            self.session_manager.register_recording(session.session_id, recording_name)
         except Exception as exc:
             logger.exception("Failed to start recording (%s) for session %s: %s", phase, session.session_id, exc)
             self._handle_no_response(session, phase, on_yes, on_no, reason="recording_failed")
