@@ -74,6 +74,10 @@ class SessionManager:
             self._handle_playback_started(event)
         elif event_type == "PlaybackFinished":
             self._handle_playback_finished(event)
+        elif event_type == "RecordingFinished":
+            self._handle_recording_finished(event)
+        elif event_type == "RecordingFailed":
+            self._handle_recording_failed(event)
         elif event_type == "StasisEnd":
             self._handle_stasis_end(event)
         else:
@@ -310,3 +314,22 @@ class SessionManager:
         if session_id:
             return self.get_session(session_id)
         return None
+
+    def _handle_recording_finished(self, event: dict) -> None:
+        recording = event.get("recording", {})
+        recording_name = recording.get("name")
+        channel = event.get("channel", {})
+        channel_id = channel.get("id")
+        session = self._get_session_by_channel(channel_id)
+        if session and hasattr(self.scenario_handler, "on_recording_finished"):
+            self.scenario_handler.on_recording_finished(session, recording_name)
+
+    def _handle_recording_failed(self, event: dict) -> None:
+        recording = event.get("recording", {})
+        recording_name = recording.get("name")
+        cause = recording.get("cause", "unknown")
+        channel = event.get("channel", {})
+        channel_id = channel.get("id")
+        session = self._get_session_by_channel(channel_id)
+        if session and hasattr(self.scenario_handler, "on_recording_failed"):
+            self.scenario_handler.on_recording_failed(session, recording_name, cause)

@@ -78,6 +78,8 @@ class MarketingScenario(BaseScenario):
             self._capture_response(session, phase="confirm_transfer", on_yes=self._handle_confirm_yes, on_no=self._handle_confirm_no)
         elif prompt_key == "goodby":
             self._hangup(session)
+        elif prompt_key == "processing":
+            return
 
     def on_call_failed(self, session: Session, reason: str) -> None:
         if session.result is None:
@@ -131,6 +133,8 @@ class MarketingScenario(BaseScenario):
             return
 
         recording_name = f"{phase}-{session.session_id}"
+        session.metadata["recording_phase"] = phase
+        session.metadata["recording_name"] = recording_name
         logger.info("Recording %s response for session %s", phase, session.session_id)
         try:
             self.ari_client.record_channel(
@@ -144,12 +148,27 @@ class MarketingScenario(BaseScenario):
             self._handle_no_response(session, phase, on_yes, on_no, reason="recording_failed")
             return
 
+    def on_recording_finished(self, session: Session, recording_name: str) -> None:
+        phase = session.metadata.get("recording_phase")
+        if not phase or session.metadata.get("recording_name") != recording_name:
+            return
+        on_yes, on_no = self._callbacks_for_phase(phase)
         thread = threading.Thread(
             target=self._transcribe_response,
             args=(session, recording_name, phase, on_yes, on_no),
             daemon=True,
         )
         thread.start()
+
+    def on_recording_failed(self, session: Session, recording_name: str, cause: str) -> None:
+        phase = session.metadata.get("recording_phase")
+        if not phase or session.metadata.get("recording_name") != recording_name:
+            return
+        on_yes, on_no = self._callbacks_for_phase(phase)
+        logger.warning(
+            "Recording failed (phase=%s) for session %s cause=%s", phase, session.session_id, cause
+        )
+        self._handle_no_response(session, phase, on_yes, on_no, reason=f"recording_failed:{cause}")
 
     def _transcribe_response(
         self,
@@ -159,7 +178,7 @@ class MarketingScenario(BaseScenario):
         on_yes: Callable[[Session], None],
         on_no: Callable[[Session], None],
     ) -> None:
-        time.sleep(7)
+        time.sleep(0.5)
         try:
             audio_bytes = self.ari_client.fetch_stored_recording(recording_name)
             self._play_processing(session)
@@ -291,6 +310,11 @@ class MarketingScenario(BaseScenario):
         if playback_id:
             session.playbacks[playback_id] = "processing"
             self.session_manager.register_playback(session.session_id, playback_id)
+
+    def _callbacks_for_phase(self, phase: str) -> tuple[Callable[[Session], None], Callable[[Session], None]]:
+        if phase == "interest":
+            return self._handle_interest_yes, self._handle_interest_no
+        return self._handle_confirm_yes, self._handle_confirm_no
 
     # Result reporting ----------------------------------------------------
     def _report_result(self, session: Session) -> None:
