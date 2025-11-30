@@ -261,8 +261,12 @@ class MarketingScenario(BaseScenario):
         self._play_prompt(session, "goodby")
 
     def _handle_confirm_yes(self, session: Session) -> None:
-        session.result = "connected_to_operator"
-        self._connect_to_operator(session)
+        if self._is_inbound_only(session):
+            session.result = "not_interested"
+            self._play_prompt(session, "goodby")
+        else:
+            session.result = "connected_to_operator"
+            self._connect_to_operator(session)
 
     def _handle_confirm_no(self, session: Session) -> None:
         session.result = "not_interested"
@@ -289,6 +293,9 @@ class MarketingScenario(BaseScenario):
     def _connect_to_operator(self, session: Session) -> None:
         if session.metadata.get("operator_call_started") == "1":
             logger.debug("Operator call already started for session %s; skipping", session.session_id)
+            return
+        if self._is_inbound_only(session):
+            logger.debug("Inbound-only session %s; skipping operator connect", session.session_id)
             return
         customer_channel = self._customer_channel_id(session)
         if not customer_channel:
@@ -329,6 +336,9 @@ class MarketingScenario(BaseScenario):
         if phase == "interest":
             return self._handle_interest_yes, self._handle_interest_no
         return self._handle_confirm_yes, self._handle_confirm_no
+
+    def _is_inbound_only(self, session: Session) -> bool:
+        return session.inbound_leg is not None and session.outbound_leg is None
 
     # Result reporting ----------------------------------------------------
     def _report_result(self, session: Session) -> None:
