@@ -63,8 +63,35 @@ def transcribe_audio(
         logger.error("Vira STT HTTP error %s: %s", response.status_code, response.text)
         raise
     payload = response.json()
-    text = payload.get("data", {}).get("text", "")
-    status = payload.get("status", "unknown")
-    request_id = payload.get("data", {}).get("requestId")
-    trace_id = payload.get("data", {}).get("traceId")
+    data_section = payload.get("data", {}) or {}
+    nested_data = data_section.get("data", {}) or {}
+    ai_response = nested_data.get("aiResponse", {}) or {}
+    ai_result = ai_response.get("result", {}) or {}
+
+    text = (
+        data_section.get("text")
+        or nested_data.get("text")
+        or ai_result.get("text")
+        or ""
+    )
+    status = (
+        data_section.get("status")
+        or payload.get("status")
+        or ai_response.get("status")
+        or "unknown"
+    )
+    request_id = (
+        data_section.get("requestId")
+        or nested_data.get("requestId")
+        or ai_response.get("requestId")
+    )
+    trace_id = (
+        data_section.get("traceId")
+        or nested_data.get("traceId")
+        or ai_response.get("meta", {}).get("traceId")
+    )
+
+    if not text:
+        logger.warning("Vira STT returned empty text. status=%s payload=%s", status, payload)
+
     return STTResult(status=status, text=text, request_id=request_id, trace_id=trace_id)
