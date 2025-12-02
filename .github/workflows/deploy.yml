@@ -1,32 +1,36 @@
-name: Deploy to Server
+name: Deploy (Self-Hosted)
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, deploy]
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
+      - name: Checkout repo (for metadata only)
         uses: actions/checkout@v4
 
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.APP_DIR }}"
-            git pull
-            python3 -m venv venv || true
-            source venv/bin/activate
-            pip install --upgrade pip
-            pip install --upgrade -r requirements.txt
-            if [ -n "${{ secrets.SERVICE_NAME }}" ]; then
-              sudo systemctl restart "${{ secrets.SERVICE_NAME }}"
-            fi
+      - name: Deploy locally on runner
+        run: |
+          set -euo pipefail
+          APP_DIR="/opt/ari_app"
+          SERVICE_NAME="salehi.service"
+
+          echo "Deploying to ${APP_DIR}"
+          git -C "${APP_DIR}" fetch --all --prune
+          git -C "${APP_DIR}" reset --hard origin/main
+
+          python3 -m venv "${APP_DIR}/venv" || true
+          source "${APP_DIR}/venv/bin/activate"
+          pip install --upgrade pip
+          pip install --upgrade -r "${APP_DIR}/requirements.txt"
+
+          sudo systemctl restart "${SERVICE_NAME}"
