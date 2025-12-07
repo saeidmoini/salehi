@@ -34,14 +34,14 @@ class ViraSTTClient:
         self.settings = settings
         self.timeout = timeout
         self.semaphore = semaphore or asyncio.Semaphore(10)
-        limits = httpx.Limits(
+        self.limits = httpx.Limits(
             max_connections=max_connections,
             max_keepalive_connections=max_connections,
         )
-        self.client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
     async def close(self) -> None:
-        await self.client.aclose()
+        # Kept for interface parity; no persistent client.
+        return
 
     async def transcribe_audio(
         self,
@@ -76,13 +76,13 @@ class ViraSTTClient:
                 data_list.append(("hotwords[]", word))
 
         async with self.semaphore:
-            response = await self.client.post(
-                self.settings.stt_url,
-                headers=headers,
-                data=data_list,
-                files=files,
-                timeout=self.timeout,
-            )
+            async with httpx.AsyncClient(timeout=self.timeout, limits=self.limits) as client:
+                response = await client.post(
+                    self.settings.stt_url,
+                    headers=headers,
+                    data=data_list,
+                    files=files,
+                )
         response.raise_for_status()
         payload = response.json()
         data_section = payload.get("data", {}) or {}
