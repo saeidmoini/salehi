@@ -15,6 +15,29 @@ from stt_tts.vira_stt import ViraSTTClient
 from stt_tts.vira_tts import ViraTTSClient
 from utils.audio_sync import ensure_audio_assets
 
+ALLOWED_LOG_PREFIXES = (
+    "app",
+    "core",
+    "logic",
+    "sessions",
+    "stt_tts",
+    "llm",
+    "utils",
+    "config",
+    "main",
+)
+
+
+def _build_handler(formatter: logging.Formatter, log_path: Path | None = None) -> logging.Handler:
+    handler: logging.Handler
+    if log_path:
+        handler = RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=5)
+    else:
+        handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    handler.addFilter(lambda record: record.name.startswith(ALLOWED_LOG_PREFIXES))
+    return handler
+
 
 def configure_logging(level: str) -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
@@ -24,18 +47,14 @@ def configure_logging(level: str) -> None:
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     root = logging.getLogger()
     root.setLevel(log_level)
-    # Clear existing handlers to avoid duplicates on reload.
     for handler in list(root.handlers):
         root.removeHandler(handler)
 
-    console = logging.StreamHandler()
-    console.setFormatter(formatter)
+    handler_console = _build_handler(formatter)
+    handler_file = _build_handler(formatter, log_dir / "app.log")
 
-    file_handler = RotatingFileHandler(log_dir / "app.log", maxBytes=5 * 1024 * 1024, backupCount=5)
-    file_handler.setFormatter(formatter)
-
-    root.addHandler(console)
-    root.addHandler(file_handler)
+    root.addHandler(handler_console)
+    root.addHandler(handler_file)
 
 
 async def async_main() -> None:
