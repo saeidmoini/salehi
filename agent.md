@@ -7,7 +7,7 @@ This repository hosts an ARI-based call-control engine for outbound marketing ca
 - `config/`: environment loader (`get_settings`) and dataclasses for ARI, GapGPT, Vira, dialer limits, concurrency, and timeouts.
 - `core/`: async ARI HTTP client (`ari_client.py`, httpx) and WebSocket listener (`ari_ws.py`, websockets).
 - `sessions/`: in-memory session/bridge/leg models and async `SessionManager` for routing ARI events to scenario hooks.
-- `logic/`: scenario modules. Current scenario: `marketing_outreach.py`. Dialer/rate-limit logic in `logic/dialer.py`.
+- `logic/`: scenario modules. Current scenario: `marketing_outreach.py` (single capture: hello → record → classify yes/no/number-question; yes plays `yes` then operator bridge; no/unknown plays `goodby`; number-question plays `number` then `goodby`). Dialer/rate-limit logic in `logic/dialer.py`.
 - `llm/`: async GapGPT wrapper with semaphore.
 - `stt_tts/`: async Vira STT/TTS wrappers with semaphore guards.
 
@@ -23,7 +23,7 @@ This repository hosts an ARI-based call-control engine for outbound marketing ca
 - When adding scenarios, create a new module under `logic/` and wire it in `main.py` and `SessionManager` hooks. Preserve the existing marketing scenario unless the user replaces it.
 - Rate limiting is handled by `logic/dialer.py` (concurrency, per-minute, per-day, call windows). Adjust via env vars and document changes.
 - STT/TTS hooks use Vira endpoints; tokens are separate for STT and TTS (`VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`). `VIRA_TOKEN` is unused for STT.
-- Recording/transcription fetches stored recordings via the async `AriClient`; transcription runs as async tasks behind Vira STT semaphore limits.
+- Recording/transcription fetches stored recordings via the async `AriClient`; transcription runs as async tasks behind Vira STT semaphore limits with hotwords seeded from scenario phrases.
 - Logging uses the standard library. Keep logs informative for Stasis events, playbacks, originates, STT/LLM failures.
 - Audio sync is automatic at startup: mp3s under `assets/audio/src` are converted to wav (16k mono) and copied to the configured `AST_SOUND_DIR` for playback as `sound:custom/<name>`.
 - Everything is async/await: no `requests`, no `websocket-client`, no blocking `time.sleep`. HTTP uses httpx.AsyncClient with connection pooling limits; WebSocket uses `websockets`. Protect session dictionaries with `asyncio.Lock`, and guard STT/TTS/LLM with semaphores (`MAX_PARALLEL_*`).

@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import signal
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from config import get_settings
 from core.ari_client import AriClient
@@ -15,10 +17,25 @@ from utils.audio_sync import ensure_audio_assets
 
 
 def configure_logging(level: str) -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    log_level = getattr(logging, level.upper(), logging.INFO)
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(log_level)
+    # Clear existing handlers to avoid duplicates on reload.
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+
+    file_handler = RotatingFileHandler(log_dir / "app.log", maxBytes=5 * 1024 * 1024, backupCount=5)
+    file_handler.setFormatter(formatter)
+
+    root.addHandler(console)
+    root.addHandler(file_handler)
 
 
 async def async_main() -> None:

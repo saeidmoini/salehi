@@ -43,14 +43,12 @@ Set via environment or `.env`:
 - `config/`: env loader and strongly-typed settings, including concurrency/timeouts.
 
 ## Scenario Flow (current)
-1. Dialer pulls numbers from `STATIC_CONTACTS` and originates via `PJSIP/<number>@<OUTBOUND_TRUNK>` respecting all limits and call windows. Inbound calls to the ARI app follow the same prompts but skip operator transfer.
+1. Dialer pulls numbers from `STATIC_CONTACTS` and originates via `PJSIP/<number>@<OUTBOUND_TRUNK>` respecting all limits and call windows. Inbound calls follow the same prompts but skip operator transfer.
 2. On answer, play `hello`.
-3. Record a short reply, transcribe with Vira STT, and classify intent (heuristic with GapGPT fallback if available).
+3. Record a short reply, transcribe with Vira STT (hotwords tuned to yes/no lists), and classify intent (heuristic with GapGPT fallback if available).
 4. If intent is **no** or silence/unknown: play `goodby`, then hang up.
-5. If intent is **yes**: play `second`.
-6. After `second`, record again (max 10s, silence cutoff 2s):
-   - **yes**: for outbound calls, originate/bridge operator leg to `PJSIP/<OPERATOR_EXTENSION>@<OPERATOR_TRUNK>` (default 200). Mark result `connected_to_operator`. For inbound calls, skip transfer and play `goodby`.
-   - **no** or repeated failures: play `goodby`, then hang up.
+5. If intent is **yes**: play `yes`, then originate/bridge operator leg to `PJSIP/<OPERATOR_EXTENSION>@<OPERATOR_TRUNK>` (default 200). Mark result `connected_to_operator`. Inbound calls skip operator transfer.
+6. If caller asks “شماره منو از کجا آوردید”: play `number`, then play `goodby` and hang up.
 7. When any leg hangs up, remaining legs are torn down; results are logged in `_report_result` for the future panel API.
 
 ## Result statuses (current)
@@ -69,4 +67,4 @@ Set via environment or `.env`:
 - Confirm ARI credentials and app name; WebSocket URL must be reachable from the app host.
 - Ensure custom sound files exist and are readable by Asterisk.
 - If Vira tokens are missing, STT will return empty text and the call will follow the no-response path.
-- Check logs for originate or playback errors; increase `LOG_LEVEL=DEBUG` for more detail. Verify semaphore limits (`MAX_PARALLEL_*`) are high enough for expected load and that HTTP limits/timeouts are tuned for your network.
+- Check logs for originate or playback errors; increase `LOG_LEVEL=DEBUG` for more detail. Logs go to stdout (journal in systemd) and `logs/app.log` with rotation. Verify semaphore limits (`MAX_PARALLEL_*`) are high enough for expected load and that HTTP limits/timeouts are tuned for your network.

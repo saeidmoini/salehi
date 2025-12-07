@@ -18,8 +18,8 @@ class MarketingScenario(BaseScenario):
     """
     Outbound marketing flow:
     1) Play hello prompt.
-    2) Capture YES/NO once. NO/unknown -> goodbye. YES -> play second prompt.
-    3) Capture YES/NO once. YES -> bridge to operator ext (200). NO/unknown -> goodbye.
+    2) Capture single response. NO/unknown -> goodbye. YES -> play yes prompt then bridge to operator.
+    3) If asked "شماره منو از کجا آوردید": play number prompt then goodbye.
     4) After bridge, let operator/caller hang up; then report status.
     """
 
@@ -41,9 +41,26 @@ class MarketingScenario(BaseScenario):
         self.prompt_media = {
             "hello": "sound:custom/hello",
             "goodby": "sound:custom/goodby",
-            "second": "sound:custom/second",
+            "yes": "sound:custom/yes",
+            "number": "sound:custom/number",
             "processing": "sound:beep",
         }
+        # Hotwords to bias STT toward common intents.
+        self.stt_hotwords = [
+            # Negative/stop intents
+            "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "دو ساعت دیگه زنگ بزن", "وقت ندارم",
+            "میشه برام بفرستید", "خصوصی دارید", "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
+            "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
+            "برای کسی دیگه می‌خوام", "بفرستید کسی دیگه خواست شماره تون رو میدم",
+            # Positive/engaged intents
+            "بله", "اوکی", "در خدمتم", "بفرمایید", "تضمین چیه", "کجا هستید", "قیمتش چنده",
+            "سایت دارین", "نمونه تدریس", "آدرس کجاست", "ترمیکه", "اساتید کین",
+            "طول دوره چقدره", "چه کتابی تدریس میشه", "من از پایه می‌خوام شروع کنم",
+            "هزینه اش چقدره", "زیر نظر چه سازمانی هستید", "مدرک میدید", "از چه سطحی شروع میشه",
+            "مدرک معتبره", "من می‌خوام مهاجرت کنم", "حالا شما یه توضیح بدید",
+            # Special question
+            "شماره منو از کجا آوردید",
+        ]
 
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
@@ -78,17 +95,12 @@ class MarketingScenario(BaseScenario):
             await self._capture_response(
                 session,
                 phase="interest",
-                on_yes=self._handle_interest_yes,
-                on_no=self._handle_interest_no,
+                on_yes=self._handle_yes,
+                on_no=self._handle_no,
             )
-        elif prompt_key == "second":
-            await self._capture_response(
-                session,
-                phase="confirm_transfer",
-                on_yes=self._handle_confirm_yes,
-                on_no=self._handle_confirm_no,
-            )
-        elif prompt_key == "goodby":
+        elif prompt_key == "yes":
+            await self._connect_to_operator(session)
+        elif prompt_key in {"goodby", "number"}:
             await self._hangup(session)
 
     async def on_call_failed(self, session: Session, reason: str) -> None:
@@ -208,7 +220,9 @@ class MarketingScenario(BaseScenario):
     ) -> None:
         try:
             audio_bytes = await self.ari_client.fetch_stored_recording(recording_name)
-            stt_result: STTResult = await self.stt_client.transcribe_audio(audio_bytes)
+            stt_result: STTResult = await self.stt_client.transcribe_audio(
+                audio_bytes, hotwords=self.stt_hotwords
+            )
             transcript = stt_result.text.strip()
             logger.info(
                 "STT result (%s) for session %s: %s (status=%s)",
@@ -220,10 +234,12 @@ class MarketingScenario(BaseScenario):
             if not transcript:
                 await self._handle_no_response(session, phase, on_yes, on_no, reason="empty_transcript")
                 return
-            intent = await self._detect_yes_no(transcript)
+            intent = await self._detect_intent(transcript)
             async with session.lock:
                 session.responses.append({"phase": phase, "text": transcript, "intent": intent})
-            if intent == "yes":
+            if intent == "number_question":
+                await self._handle_number_question(session)
+            elif intent == "yes":
                 await on_yes(session)
             elif intent == "no":
                 await on_no(session)
@@ -233,10 +249,26 @@ class MarketingScenario(BaseScenario):
             logger.exception("Transcription failed (%s) for session %s: %s", phase, session.session_id, exc)
             await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
 
-    async def _detect_yes_no(self, transcript: str) -> str:
+    async def _detect_intent(self, transcript: str) -> str:
         text = transcript.lower()
-        yes_tokens = {"yes", "sure", "ok", "yah", "yea", "yeah", "بله", "اره", "آره", "مایلم"}
-        no_tokens = {"no", "not", "nope", "نه", "خیر", "نیستم"}
+        # Persian/English positive cues
+        yes_tokens = {
+            "yes", "sure", "ok", "yah", "yea", "yeah",
+            "بله", "اوکی", "در خدمتم", "بفرمایید", "تضمین چیه", "کجا هستید", "قیمتش چنده",
+            "سایت دارین", "نمونه تدریس", "آدرس کجاست", "ترمیکه", "اساتید کین",
+            "طول دوره چقدره", "چه کتابی تدریس میشه", "من از پایه می‌خوام شروع کنم",
+            "هزینه اش چقدره", "زیر نظر چه سازمانی هستید", "مدرک میدید", "از چه سطحی شروع میشه",
+            "مدرک معتبره", "من می‌خوام مهاجرت کنم", "حالا شما یه توضیح بدید",
+        }
+        no_tokens = {
+            "no", "not", "nope",
+            "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "دو ساعت دیگه زنگ بزن", "وقت ندارم",
+            "میشه برام بفرستید", "خصوصی دارید", "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
+            "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
+            "برای کسی دیگه می‌خوام", "بفرستید کسی دیگه خواست شماره تون رو میدم",
+        }
+        if "شماره" in text and ("از کجا" in text or "کجا آوردید" in text or "کجا آوردن" in text):
+            return "number_question"
 
         if any(token in text for token in yes_tokens):
             return "yes"
@@ -265,27 +297,12 @@ class MarketingScenario(BaseScenario):
         return "unknown"
 
     # Routing -------------------------------------------------------------
-    async def _handle_interest_yes(self, session: Session) -> None:
+    async def _handle_yes(self, session: Session) -> None:
         async with session.lock:
-            session.result = session.result or "interested"
-        await self._play_prompt(session, "second")
+            session.result = session.result or "connected_to_operator"
+        await self._play_prompt(session, "yes")
 
-    async def _handle_interest_no(self, session: Session) -> None:
-        async with session.lock:
-            session.result = "not_interested"
-        await self._play_prompt(session, "goodby")
-
-    async def _handle_confirm_yes(self, session: Session) -> None:
-        if self._is_inbound_only(session):
-            async with session.lock:
-                session.result = "not_interested"
-            await self._play_prompt(session, "goodby")
-        else:
-            async with session.lock:
-                session.result = "connected_to_operator"
-            await self._connect_to_operator(session)
-
-    async def _handle_confirm_no(self, session: Session) -> None:
+    async def _handle_no(self, session: Session) -> None:
         async with session.lock:
             session.result = "not_interested"
         await self._play_prompt(session, "goodby")
@@ -307,6 +324,12 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             session.result = session.result or "user_didnt_answer"
         await self._play_prompt(session, "goodby")
+
+    async def _handle_number_question(self, session: Session) -> None:
+        logger.info("Handling number source question for session %s", session.session_id)
+        await self._play_prompt(session, "number")
+        async with session.lock:
+            session.result = session.result or "not_interested"
 
     # Operator bridge -----------------------------------------------------
     async def _connect_to_operator(self, session: Session) -> None:
@@ -356,9 +379,7 @@ class MarketingScenario(BaseScenario):
             await self.session_manager.register_playback(session.session_id, playback_id)
 
     def _callbacks_for_phase(self, phase: str) -> tuple[Callable[[Session], Awaitable[None]], Callable[[Session], Awaitable[None]]]:
-        if phase == "interest":
-            return self._handle_interest_yes, self._handle_interest_no
-        return self._handle_confirm_yes, self._handle_confirm_no
+        return self._handle_yes, self._handle_no
 
     def _is_inbound_only(self, session: Session) -> bool:
         return session.inbound_leg is not None and session.outbound_leg is None
