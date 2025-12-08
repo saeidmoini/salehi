@@ -8,6 +8,7 @@ from typing import Deque, List, Optional
 from config.settings import Settings
 from core.ari_client import AriClient
 from integrations.panel.client import NextBatchResponse, PanelClient, PanelNumber
+from sessions.session import SessionStatus
 from sessions.session_manager import SessionManager
 
 
@@ -47,6 +48,7 @@ class Dialer:
         self._running = False
         self.lock = asyncio.Lock()
         self.next_panel_poll: datetime = datetime.utcnow()
+        self.timeout_tasks: dict[str, asyncio.Task] = {}
 
     async def run(self, stop_event: asyncio.Event) -> None:
         if self._running:
@@ -142,6 +144,7 @@ class Dialer:
                 caller_id=self.settings.dialer.default_caller_id,
                 timeout=self.settings.dialer.origination_timeout,
             )
+            self._schedule_timeout_watch(session.session_id)
             self._record_attempt()
             logger.info(
                 "Origination requested for %s (session %s)", contact.phone_number, session.session_id
@@ -156,6 +159,34 @@ class Dialer:
     def _build_endpoint(self, contact: ContactItem) -> str:
         trunk = self.settings.dialer.outbound_trunk
         return f"PJSIP/{contact.phone_number}@{trunk}"
+
+    def _schedule_timeout_watch(self, session_id: str) -> None:
+        # If no events arrive (no answer/hangup), mark as missed after origination timeout + buffer.
+        timeout = self.settings.dialer.origination_timeout + 15
+        task = asyncio.create_task(self._mark_missed_if_no_events(session_id, timeout))
+        self.timeout_tasks[session_id] = task
+
+    async def _mark_missed_if_no_events(self, session_id: str, delay: int) -> None:
+        try:
+            await asyncio.sleep(delay)
+            session = await self.session_manager.get_session(session_id)
+            if not session:
+                return
+            async with session.lock:
+                if session.status == SessionStatus.COMPLETED:
+                    return
+                if session.result:
+                    return
+                session.result = "missed"
+            if self.session_manager.scenario_handler:
+                try:
+                    await self.session_manager.scenario_handler.on_call_finished(session)
+                except Exception as exc:
+                    logger.exception("Failed to report missed for session %s: %s", session_id, exc)
+            await self.session_manager._cleanup_session(session)  # type: ignore[attr-defined]
+            logger.warning("Marked session %s as missed due to timeout/no events", session_id)
+        finally:
+            self.timeout_tasks.pop(session_id, None)
 
     async def _maybe_refill_from_panel(self) -> None:
         if not self.panel_client:
