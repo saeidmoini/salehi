@@ -215,6 +215,7 @@ def get_settings() -> Settings:
         vira=vira,
         dialer=dialer,
         operator=operator,
+        panel=panel,
         audio=audio,
         concurrency=concurrency,
         timeouts=timeouts,
