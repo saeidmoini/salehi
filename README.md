@@ -4,7 +4,7 @@ Outbound, ARI-driven call-control engine for a language academy marketing campai
 
 ## Features
 - Bridge-centric ARI control (Asterisk 20 / FreePBX 17).
-- Outbound dialer with limits: concurrent calls, per-minute, per-day, and call windows.
+- Outbound dialer with limits: concurrent calls, per-minute, per-day, and call windows; can pull batches from external panel API.
 - Scenario logic for marketing outreach (hello prompt → yes/no → second prompt → yes/no → optional operator bridge for outbound only; inbound calls do not transfer).
 - STT/TTS hooks via Vira with separate STT/TTS tokens; optional GapGPT fallback for intent classification.
 - In-memory session manager ready for future Redis-backed storage.
@@ -25,8 +25,9 @@ Note: Ensure `AST_SOUND_DIR` points to your actual Asterisk custom sounds path (
 ## Configuration
 Set via environment or `.env`:
 - ARI: `ARI_BASE_URL`, `ARI_WS_URL`, `ARI_APP_NAME`, `ARI_USERNAME`, `ARI_PASSWORD`
-- Dialer: `OUTBOUND_TRUNK`, `DEFAULT_CALLER_ID`, `ORIGINATION_TIMEOUT`, `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`, `CALL_WINDOW_START`, `CALL_WINDOW_END`
+- Dialer: `OUTBOUND_TRUNK`, `DEFAULT_CALLER_ID`, `ORIGINATION_TIMEOUT`, `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`, `CALL_WINDOW_START`, `CALL_WINDOW_END`, `DIALER_BATCH_SIZE`, `DIALER_DEFAULT_RETRY`
 - Contacts: `STATIC_CONTACTS` (comma-separated; defaults to `+989000000000` until the external API is ready)
+- Panel: `PANEL_BASE_URL`, `PANEL_API_TOKEN`
 - LLM: `GAPGPT_BASE_URL`, `GAPGPT_API_KEY` (optional)
 - Vira: `VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`, `VIRA_STT_URL`, `VIRA_TTS_URL` (`VIRA_TOKEN` is unused for STT)
 - Operator bridge: `OPERATOR_EXTENSION`, `OPERATOR_TRUNK`, `OPERATOR_CALLER_ID`, `OPERATOR_TIMEOUT`
@@ -37,19 +38,20 @@ Set via environment or `.env`:
 - `main.py`: async entrypoint wiring settings, async ARI HTTP/WebSocket clients, session manager, dialer, and marketing scenario; runs under `asyncio.run`.
 - `core/`: async ARI REST client (`ari_client.py`, httpx with pooling/timeouts) and WebSocket listener (`ari_ws.py`, websockets) that fans events into tasks.
 - `sessions/`: async `SessionManager` (asyncio locks) that routes ARI events to scenario hooks and manages bridges.
-- `logic/`: `dialer.py` for rate-limited origination (async loop); `marketing_outreach.py` for scenario logic; `base.py` for shared scenario hooks.
+- `logic/`: `dialer.py` for rate-limited origination (async loop) with optional panel batches; `marketing_outreach.py` for scenario logic; `base.py` for shared scenario hooks.
+- `integrations/panel/`: async client for panel dialer API (next batch, report result).
 - `llm/`: async GapGPT wrapper (`client.py`) with semaphore limits.
 - `stt_tts/`: async Vira STT/TTS wrappers with semaphore limits.
 - `config/`: env loader and strongly-typed settings, including concurrency/timeouts.
 
 ## Scenario Flow (current)
-1. Dialer pulls numbers from `STATIC_CONTACTS` and originates via `PJSIP/<number>@<OUTBOUND_TRUNK>` respecting all limits and call windows. Inbound calls follow the same prompts but skip operator transfer.
+1. Dialer pulls numbers from panel batches (or `STATIC_CONTACTS` fallback) and originates via `PJSIP/<number>@<OUTBOUND_TRUNK>` respecting all limits and call windows. Inbound calls follow the same prompts but skip operator transfer.
 2. On answer, play `hello`.
 3. Record a short reply, transcribe with Vira STT (hotwords tuned to yes/no lists), and classify intent (heuristic with GapGPT fallback if available).
-4. If intent is **no** or silence/unknown: play `goodby`, then hang up.
+4. If intent is **no** or silence/unknown: play `goodby`, then hang up (negative transcripts also logged to `logs/negative_stt.log`).
 5. If intent is **yes**: play `yes`, then originate/bridge operator leg to `PJSIP/<OPERATOR_EXTENSION>@<OPERATOR_TRUNK>` (default 200). Mark result `connected_to_operator`. Inbound calls skip operator transfer.
-6. If caller asks “شماره منو از کجا آوردید”: play `number`, then play `goodby` and hang up.
-7. When any leg hangs up, remaining legs are torn down; results are logged in `_report_result` for the future panel API.
+6. If caller asks “شماره منو از کجا آوردید”: play `number`, then record one more reply; **yes** → play `yes` then operator flow, **no/unknown** → play `goodby`.
+7. When any leg hangs up, remaining legs are torn down; results are reported to panel (if configured) via `report_result`.
 
 ## Result statuses (current)
 - `connected_to_operator`: caller said yes twice and was bridged to the operator leg (operator leg answered).
@@ -67,4 +69,4 @@ Set via environment or `.env`:
 - Confirm ARI credentials and app name; WebSocket URL must be reachable from the app host.
 - Ensure custom sound files exist and are readable by Asterisk.
 - If Vira tokens are missing, STT will return empty text and the call will follow the no-response path.
-- Check logs for originate or playback errors; increase `LOG_LEVEL=DEBUG` for more detail. Logs go to stdout (journal in systemd) and `logs/app.log` with rotation. Verify semaphore limits (`MAX_PARALLEL_*`) are high enough for expected load and that HTTP limits/timeouts are tuned for your network.
+- Check logs for originate or playback errors; increase `LOG_LEVEL=DEBUG` for more detail. Logs go to stdout (journal in systemd) and `logs/app.log` with rotation; negative responses are duplicated in `logs/negative_stt.log`. Verify semaphore limits (`MAX_PARALLEL_*`) are high enough for expected load and that HTTP limits/timeouts are tuned for your network.

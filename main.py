@@ -10,6 +10,7 @@ from core.ari_ws import AriWebSocketClient
 from llm.client import GapGPTClient
 from logic.dialer import Dialer
 from logic.marketing_outreach import MarketingScenario
+from integrations.panel.client import PanelClient
 from sessions.session_manager import SessionManager
 from stt_tts.vira_stt import ViraSTTClient
 from stt_tts.vira_tts import ViraTTSClient
@@ -25,6 +26,7 @@ ALLOWED_LOG_PREFIXES = (
     "utils",
     "config",
     "main",
+    "integrations",
 )
 
 
@@ -92,10 +94,19 @@ async def async_main() -> None:
         max_connections=settings.concurrency.http_max_connections,
         semaphore=llm_semaphore,
     )
+    panel_client: PanelClient | None = None
+    if settings.panel.base_url and settings.panel.api_token:
+        panel_client = PanelClient(
+            base_url=settings.panel.base_url,
+            api_token=settings.panel.api_token,
+            timeout=settings.timeouts.http_timeout,
+            max_connections=settings.concurrency.http_max_connections,
+            default_retry=settings.dialer.default_retry,
+        )
     session_manager = SessionManager(ari_client, None)  # placeholder to allow scenario access
-    scenario = MarketingScenario(settings, ari_client, llm_client, stt_client, session_manager)
+    scenario = MarketingScenario(settings, ari_client, llm_client, stt_client, session_manager, panel_client)
     session_manager.scenario_handler = scenario
-    dialer = Dialer(settings, ari_client, session_manager)
+    dialer = Dialer(settings, ari_client, session_manager, panel_client=panel_client)
     scenario.attach_dialer(dialer)
 
     ws_client = AriWebSocketClient(settings.ari, session_manager.handle_event)
@@ -127,6 +138,7 @@ async def async_main() -> None:
             stt_client.close(),
             tts_client.close(),
             llm_client.close(),
+            panel_client.close() if panel_client else asyncio.sleep(0),
             return_exceptions=True,
         )
         logger.info("Shutdown complete")

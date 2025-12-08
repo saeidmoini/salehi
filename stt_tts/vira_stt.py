@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-import httpx
 import requests
 
 from config.settings import ViraSettings
@@ -35,10 +34,6 @@ class ViraSTTClient:
         self.settings = settings
         self.timeout = timeout
         self.semaphore = semaphore or asyncio.Semaphore(10)
-        self.limits = httpx.Limits(
-            max_connections=max_connections,
-            max_keepalive_connections=max_connections,
-        )
 
     async def close(self) -> None:
         return
@@ -117,13 +112,12 @@ class ViraSTTClient:
 
         return STTResult(status=status, text=text, request_id=request_id, trace_id=trace_id)
 
-    def _post_sync(self, headers: dict, data_list: list, audio_bytes: bytes) -> httpx.Response:
+    def _post_sync(self, headers: dict, data_list: list, audio_bytes: bytes) -> requests.Response:
         files = {"audio": ("audio.wav", audio_bytes, "audio/wav")}
-        response = requests.post(
+        return requests.post(
             self.settings.stt_url,
             headers=headers,
             data=data_list,
             files=files,
             timeout=self.timeout,
         )
-        return response

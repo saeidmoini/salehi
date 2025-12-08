@@ -84,6 +84,8 @@ class DialerSettings:
     call_window_start: time
     call_window_end: time
     static_contacts: List[str]
+    batch_size: int
+    default_retry: int
 
 
 @dataclass
@@ -110,10 +112,17 @@ class Settings:
     vira: ViraSettings
     dialer: DialerSettings
     operator: OperatorSettings
+    panel: "PanelSettings"
     audio: AudioSettings
     concurrency: ConcurrencySettings
     timeouts: TimeoutSettings
     log_level: str
+
+
+@dataclass
+class PanelSettings:
+    base_url: str
+    api_token: str
 
 
 def get_settings() -> Settings:
@@ -163,6 +172,8 @@ def get_settings() -> Settings:
         static_contacts=_parse_list(
             os.getenv("STATIC_CONTACTS", "+989000000000")
         ),
+        batch_size=int(os.getenv("DIALER_BATCH_SIZE", os.getenv("MAX_CALLS_PER_MINUTE", "10"))),
+        default_retry=int(os.getenv("DIALER_DEFAULT_RETRY", "60")),
     )
 
     operator = OperatorSettings(
@@ -170,6 +181,11 @@ def get_settings() -> Settings:
         trunk=os.getenv("OPERATOR_TRUNK", os.getenv("OUTBOUND_TRUNK", "TO-CUCM-Gaptel")),
         caller_id=os.getenv("OPERATOR_CALLER_ID", os.getenv("DEFAULT_CALLER_ID", "1000")),
         timeout=int(os.getenv("OPERATOR_TIMEOUT", "30")),
+    )
+
+    panel = PanelSettings(
+        base_url=os.getenv("PANEL_BASE_URL", ""),
+        api_token=os.getenv("PANEL_API_TOKEN", ""),
     )
 
     audio = AudioSettings(

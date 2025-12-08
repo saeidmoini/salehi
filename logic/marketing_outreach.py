@@ -1,9 +1,12 @@
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from config.settings import Settings
 from core.ari_client import AriClient
+from integrations.panel.client import PanelClient
 from llm.client import GapGPTClient
 from logic.base import BaseScenario
 from sessions.session import CallLeg, LegDirection, Session
@@ -30,12 +33,14 @@ class MarketingScenario(BaseScenario):
         llm_client: GapGPTClient,
         stt_client: ViraSTTClient,
         session_manager: SessionManager,
+        panel_client: Optional[PanelClient] = None,
     ):
         self.settings = settings
         self.ari_client = ari_client
         self.llm_client = llm_client
         self.stt_client = stt_client
         self.session_manager = session_manager
+        self.panel_client = panel_client
         self.dialer = None
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
         self.prompt_media = {
@@ -54,8 +59,9 @@ class MarketingScenario(BaseScenario):
             # Positive/engaged tokens
             "بله", "اوکی", "خدمت", "بفرمایید", "تضمین", "کجا", "قیمت", "سایت",
             "نمونه", "تدریس", "آدرس", "ترم", "اساتید", "دوره", "کتاب", "پایه",
-            "هزینه", "سازمان", "مدرک", "سطح", "مهاجرت", "توضیح",
+            "هزینه", "سازمان", "مدرک", "سطح", "مهاجرت", "توضیح", "باشه",
         ]
+        self.negative_logger = self._build_negative_logger()
 
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
@@ -95,7 +101,14 @@ class MarketingScenario(BaseScenario):
             )
         elif prompt_key == "yes":
             await self._connect_to_operator(session)
-        elif prompt_key in {"goodby", "number"}:
+        elif prompt_key == "number":
+            await self._capture_response(
+                session,
+                phase="number_followup",
+                on_yes=self._handle_yes,
+                on_no=self._handle_no,
+            )
+        elif prompt_key == "goodby":
             await self._hangup(session)
 
     async def on_call_failed(self, session: Session, reason: str) -> None:
@@ -237,6 +250,7 @@ class MarketingScenario(BaseScenario):
             elif intent == "yes":
                 await on_yes(session)
             elif intent == "no":
+                self._log_negative(session, transcript, phase)
                 await on_no(session)
             else:
                 await self._handle_no_response(session, phase, on_yes, on_no, reason="intent_unknown")
@@ -323,8 +337,6 @@ class MarketingScenario(BaseScenario):
     async def _handle_number_question(self, session: Session) -> None:
         logger.info("Handling number source question for session %s", session.session_id)
         await self._play_prompt(session, "number")
-        async with session.lock:
-            session.result = session.result or "not_interested"
 
     # Operator bridge -----------------------------------------------------
     async def _connect_to_operator(self, session: Session) -> None:
@@ -389,7 +401,8 @@ class MarketingScenario(BaseScenario):
                 "session_id": session.session_id,
             }
         logger.info("Report payload (stub): %s", payload)
-        # TODO: integrate with external panel API when available.
+        if self.panel_client:
+            await self._report_to_panel(session)
 
     async def _hangup(self, session: Session) -> None:
         channel_id = self._customer_channel_id(session)
@@ -399,3 +412,62 @@ class MarketingScenario(BaseScenario):
             await self.ari_client.hangup_channel(channel_id)
         except Exception as exc:
             logger.warning("Hangup failed for session %s: %s", session.session_id, exc)
+
+    def _build_negative_logger(self) -> logging.Logger:
+        neg_logger = logging.getLogger("logic.negatives")
+        if not neg_logger.handlers:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            handler = RotatingFileHandler(log_dir / "negative_stt.log", maxBytes=2 * 1024 * 1024, backupCount=3)
+            formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+            handler.setFormatter(formatter)
+            neg_logger.addHandler(handler)
+            neg_logger.setLevel(logging.INFO)
+            neg_logger.propagate = False
+        return neg_logger
+
+    def _log_negative(self, session: Session, transcript: str, phase: str) -> None:
+        self.negative_logger.info(
+            "session=%s phase=%s transcript=%s", session.session_id, phase, transcript
+        )
+
+    async def _report_to_panel(self, session: Session) -> None:
+        if not self.panel_client:
+            return
+        number_id = session.metadata.get("number_id")
+        phone_number = session.metadata.get("contact_number")
+        batch_id = session.metadata.get("batch_id")
+        attempted_iso = session.metadata.get("attempted_at")
+        from datetime import datetime, timezone
+
+        attempted_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+        if attempted_iso:
+            try:
+                attempted_at = datetime.fromisoformat(attempted_iso).replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        result = session.result or "unknown"
+        status = "FAILED"
+        reason = result
+        if result == "connected_to_operator":
+            status = "CONNECTED"
+            reason = "User said yes and connected to operator"
+        elif result == "not_interested":
+            status = "NOT_INTERESTED"
+            reason = "User declined"
+        elif result == "user_didnt_answer":
+            status = "MISSED"
+            reason = "No usable speech/intent"
+        elif result.startswith("failed:"):
+            status = "FAILED"
+            reason = result
+
+        await self.panel_client.report_result(
+            number_id=number_id,
+            phone_number=phone_number,
+            status=status,
+            reason=reason,
+            attempted_at=attempted_at,
+            batch_id=batch_id,
+        )
