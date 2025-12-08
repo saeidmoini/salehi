@@ -34,6 +34,13 @@ class ViraSTTClient:
         self.settings = settings
         self.timeout = timeout
         self.semaphore = semaphore or asyncio.Semaphore(10)
+        if not settings.verify_ssl:
+            try:
+                import urllib3
+
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except Exception:
+                pass
 
     async def close(self) -> None:
         return
@@ -77,6 +84,13 @@ class ViraSTTClient:
                 data_list,
                 audio_bytes,
             )
+        if response.status_code >= 400:
+            try:
+                logger.error(
+                    "Vira STT error %s: %s", response.status_code, response.text
+                )
+            except Exception:
+                logger.error("Vira STT error %s (failed to read body)", response.status_code)
         response.raise_for_status()
         payload = response.json()
         data_section = payload.get("data", {}) or {}
