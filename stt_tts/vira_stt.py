@@ -75,13 +75,12 @@ class ViraSTTClient:
                 data_list.append(("hotwords[]", word))
 
         async with self.semaphore:
-            async with httpx.AsyncClient(timeout=self.timeout, limits=self.limits) as client:
-                response = await client.post(
-                    self.settings.stt_url,
-                    headers=headers,
-                    data=data_list,
-                    files=files,
-                )
+            response = await asyncio.to_thread(
+                self._post_sync,
+                headers,
+                data_list,
+                files,
+            )
         response.raise_for_status()
         payload = response.json()
         data_section = payload.get("data", {}) or {}
@@ -116,3 +115,12 @@ class ViraSTTClient:
             logger.warning("Vira STT returned empty text. status=%s payload=%s", status, payload)
 
         return STTResult(status=status, text=text, request_id=request_id, trace_id=trace_id)
+
+    def _post_sync(self, headers: dict, data_list: list, files: dict) -> httpx.Response:
+        with httpx.Client(timeout=self.timeout, limits=self.limits) as client:
+            return client.post(
+                self.settings.stt_url,
+                headers=headers,
+                data=data_list,
+                files=files,
+            )
