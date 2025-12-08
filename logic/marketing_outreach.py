@@ -276,7 +276,19 @@ class MarketingScenario(BaseScenario):
             "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
             "برای کسی دیگه می‌خوام", "بفرستید کسی دیگه خواست شماره تون رو میدم",
         }
-        if "شماره" in text and ("از کجا" in text or "کجا آوردید" in text or "کجا آوردن" in text):
+        number_question_phrases = [
+            "شماره منو از کجا آوردی",
+            "شماره منو از کجا آوردین",
+            "شماره من را از کجا آوردی",
+            "شماره را از کجا آوردید",
+            "شماره از کجا آوردی",
+            "شماره از کجا آوردید",
+            "از کجا آوردی",
+            "از کجا آوردین",
+            "کجا آوردی",
+            "کجا آوردید",
+        ]
+        if any(phrase in text for phrase in number_question_phrases):
             return "number_question"
 
         if any(token in text for token in yes_tokens):
