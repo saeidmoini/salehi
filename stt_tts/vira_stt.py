@@ -120,4 +120,5 @@ class ViraSTTClient:
             data=data_list,
             files=files,
             timeout=self.timeout,
+            verify=self.settings.verify_ssl,
         )

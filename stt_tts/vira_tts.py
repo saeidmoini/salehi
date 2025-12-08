@@ -38,7 +38,7 @@ class ViraTTSClient:
             max_connections=max_connections,
             max_keepalive_connections=max_connections,
         )
-        self.client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        self.client = httpx.AsyncClient(timeout=timeout, limits=limits, verify=settings.verify_ssl)
 
     async def close(self) -> None:
         await self.client.aclose()

@@ -55,6 +55,7 @@ class ViraSettings:
     tts_token: str
     stt_url: str
     tts_url: str
+    verify_ssl: bool
 
 
 @dataclass
@@ -149,6 +150,7 @@ def get_settings() -> Settings:
         tts_url=os.getenv(
             "VIRA_TTS_URL", "https://partai.gw.isahab.ir/avasho/v2/avasho/request"
         ),
+        verify_ssl=os.getenv("VIRA_VERIFY_SSL", "true").lower() not in ("0", "false", "no"),
     )
 
     call_window_start = _parse_time(
