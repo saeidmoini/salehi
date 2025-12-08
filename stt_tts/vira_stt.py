@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+import requests
 
 from config.settings import ViraSettings
 
@@ -79,7 +80,7 @@ class ViraSTTClient:
                 self._post_sync,
                 headers,
                 data_list,
-                files,
+                audio_bytes,
             )
         response.raise_for_status()
         payload = response.json()
@@ -116,11 +117,13 @@ class ViraSTTClient:
 
         return STTResult(status=status, text=text, request_id=request_id, trace_id=trace_id)
 
-    def _post_sync(self, headers: dict, data_list: list, files: dict) -> httpx.Response:
-        with httpx.Client(timeout=self.timeout, limits=self.limits) as client:
-            return client.post(
-                self.settings.stt_url,
-                headers=headers,
-                data=data_list,
-                files=files,
-            )
+    def _post_sync(self, headers: dict, data_list: list, audio_bytes: bytes) -> httpx.Response:
+        files = {"audio": ("audio.wav", audio_bytes, "audio/wav")}
+        response = requests.post(
+            self.settings.stt_url,
+            headers=headers,
+            data=data_list,
+            files=files,
+            timeout=self.timeout,
+        )
+        return response
