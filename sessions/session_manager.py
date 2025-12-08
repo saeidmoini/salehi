@@ -222,6 +222,7 @@ class SessionManager:
             session.status = SessionStatus.COMPLETED
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
+        await self._cleanup_session(session)
 
     async def _handle_channel_destroyed(self, event: dict) -> None:
         channel = event.get("channel", {})
@@ -235,8 +236,6 @@ class SessionManager:
                 leg.state = LegState.HUNGUP
             session.status = SessionStatus.COMPLETED
         await self._cleanup_session(session)
-        if self.scenario_handler:
-            await self.scenario_handler.on_call_finished(session)
 
     async def _handle_playback_finished(self, event: dict) -> None:
         playback = event.get("playback", {})
@@ -270,6 +269,18 @@ class SessionManager:
             await self._cleanup_session(session)
 
     async def _cleanup_session(self, session: Session) -> None:
+        report = False
+        if self.scenario_handler:
+            async with session.lock:
+                if session.metadata.get("finished_reported") != "1":
+                    session.metadata["finished_reported"] = "1"
+                    report = True
+        if report:
+            try:
+                await self.scenario_handler.on_call_finished(session)
+            except Exception as exc:
+                logger.exception("Error reporting call finished for session %s: %s", session.session_id, exc)
+
         # Proactively hang up any remaining legs before cleaning.
         tasks = []
         for leg in (session.inbound_leg, session.outbound_leg, session.operator_leg):
