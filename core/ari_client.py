@@ -159,6 +159,16 @@ class AriClient:
             "POST", f"/channels/{channel_id}/record", params=params
         )
 
+    async def get_channel_variable(self, channel_id: str, variable: str) -> Optional[str]:
+        try:
+            resp = await self._request(
+                "GET", f"/channels/{channel_id}/variable", params={"variable": variable}
+            )
+            return resp.get("value") if isinstance(resp, dict) else None
+        except Exception as exc:
+            logger.debug("Failed to fetch channel var %s for %s: %s", variable, channel_id, exc)
+            return None
+
     async def fetch_stored_recording(self, name: str) -> bytes:
         logger.debug("Fetching stored recording %s", name)
         response = await self.client.get(f"/recordings/stored/{name}/file")
