@@ -162,6 +162,10 @@ class SessionManager:
                     endpoint=channel.get("caller", {}).get("number", "unknown"),
                 )
                 session.status = SessionStatus.RINGING
+                caller_num = channel.get("caller", {}).get("number")
+                if caller_num:
+                    session.metadata["caller_number"] = caller_num
+                    session.metadata["contact_number"] = caller_num
             async with self.lock:
                 self.sessions[session_id] = session
             await self._index_channel(session_id, channel_id)
@@ -176,17 +180,17 @@ class SessionManager:
             await self._maybe_mark_answered(session, session.inbound_leg, channel_state)
             if self.scenario_handler:
                 await self.scenario_handler.on_inbound_channel_created(session)
-            logger.info("Inbound channel %s created session %s", channel_id, session_id)
-            # Capture forwarding headers for inbound to know the intermediate line.
             divert = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
             pai = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(P-Asserted-Identity)")
+            logger.info(
+                "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s",
+                channel_id,
+                session_id,
+                session.metadata.get("caller_number"),
+                divert,
+                pai,
+            )
             if divert or pai:
-                logger.info(
-                    "Inbound forward info session=%s diversion=%s p_asserted=%s",
-                    session.session_id,
-                    divert,
-                    pai,
-                )
                 async with session.lock:
                     if divert:
                         session.metadata["diversion"] = divert
