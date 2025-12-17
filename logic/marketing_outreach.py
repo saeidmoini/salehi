@@ -108,8 +108,8 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
+            # Operator connect may already be in progress from _handle_yes
             await self._play_onhold(session)
-            await self._connect_to_operator(session)
         elif prompt_key == "number":
             await self._capture_response(
                 session,
@@ -379,6 +379,9 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             session.metadata["intent_yes"] = "1"
         await self._play_prompt(session, "yes")
+        # Start hold music and connect operator immediately (do not wait for playback finished).
+        await self._play_onhold(session)
+        await self._connect_to_operator(session)
 
     async def _handle_no(self, session: Session) -> None:
         async with session.lock:
