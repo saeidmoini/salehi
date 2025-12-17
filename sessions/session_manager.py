@@ -172,13 +172,14 @@ class SessionManager:
             async with self.lock:
                 self.sessions[session_id] = session
             # Reject inbound if called number not in allowed list (our own numbers).
-            divert_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
-            to_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(To)")
+            divert_header = await self._get_header(channel_id, "Diversion")
+            to_header = await self._get_header(channel_id, "To")
+            hist_header = await self._get_header(channel_id, "History-Info")
             called_candidates = [called_num]
-            if divert_header:
-                called_candidates.append(self._extract_number_from_header(divert_header))
-            if to_header:
-                called_candidates.append(self._extract_number_from_header(to_header))
+            for hdr in (divert_header, to_header, hist_header):
+                parsed = self._extract_number_from_header(hdr)
+                if parsed:
+                    called_candidates.append(parsed)
             allowed = not self.allowed_inbound_numbers or any(
                 self._normalize_number(num) in self.allowed_inbound_numbers for num in called_candidates if num
             )
@@ -207,9 +208,9 @@ class SessionManager:
             await self._maybe_mark_answered(session, session.inbound_leg, channel_state)
             if self.scenario_handler:
                 await self.scenario_handler.on_inbound_channel_created(session)
-            divert = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
-            pai = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(P-Asserted-Identity)")
-            to_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(To)")
+            divert = await self._get_header(channel_id, "Diversion")
+            pai = await self._get_header(channel_id, "P-Asserted-Identity")
+            to_header = await self._get_header(channel_id, "To")
             called_candidates.append(self._extract_number_from_header(to_header))
             logger.info(
                 "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s to=%s",
@@ -380,6 +381,13 @@ class SessionManager:
             if leg and leg.channel_id == channel_id:
                 return leg
         return None
+
+    async def _get_header(self, channel_id: str, header: str) -> Optional[str]:
+        # Try PJSIP header first, fall back to generic SIP_HEADER
+        val = await self.ari_client.get_channel_variable(channel_id, f"PJSIP_HEADER({header})")
+        if val:
+            return val
+        return await self.ari_client.get_channel_variable(channel_id, f"SIP_HEADER({header})")
 
     @staticmethod
     def _normalize_number(number: Optional[str]) -> Optional[str]:
