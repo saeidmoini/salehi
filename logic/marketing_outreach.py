@@ -473,6 +473,15 @@ class MarketingScenario(BaseScenario):
                 "session_id": session.session_id,
             }
         logger.info("Report payload (stub): %s", payload)
+        if self.dialer:
+            await self.dialer.on_result(
+                session.session_id,
+                session.result,
+                session.metadata.get("number_id"),
+                session.metadata.get("contact_number"),
+                session.metadata.get("batch_id"),
+                session.metadata.get("attempted_at"),
+            )
         if self.panel_client:
             await self._report_to_panel(session)
 
@@ -507,6 +516,8 @@ class MarketingScenario(BaseScenario):
 
     async def _report_to_panel(self, session: Session) -> None:
         if not self.panel_client:
+            return
+        if session.inbound_leg and session.outbound_leg is None:
             return
         number_id = session.metadata.get("number_id")
         phone_number = session.metadata.get("contact_number")

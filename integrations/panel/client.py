@@ -107,10 +107,8 @@ class PanelClient:
         reason: str,
         attempted_at: datetime,
         batch_id: Optional[str] = None,
+        call_allowed: Optional[bool] = None,
     ) -> None:
-        if number_id is None and not phone_number:
-            logger.debug("Skipping panel report: missing number_id and phone_number payload=%s/%s", status, reason)
-            return
         payload = {
             "number_id": number_id,
             "phone_number": phone_number,
@@ -120,6 +118,8 @@ class PanelClient:
         }
         if batch_id:
             payload["batch_id"] = batch_id
+        if call_allowed is not None:
+            payload["call_allowed"] = call_allowed
         try:
             resp = await self.client.post("/api/dialer/report-result", json=payload)
             resp.raise_for_status()

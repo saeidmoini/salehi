@@ -103,7 +103,7 @@ async def async_main() -> None:
             max_connections=settings.concurrency.http_max_connections,
             default_retry=settings.dialer.default_retry,
         )
-    session_manager = SessionManager(ari_client, None)  # placeholder to allow scenario access
+    session_manager = SessionManager(ari_client, None, allowed_inbound_numbers=settings.dialer.outbound_numbers)  # placeholder to allow scenario access
     scenario = MarketingScenario(settings, ari_client, llm_client, stt_client, session_manager, panel_client)
     session_manager.scenario_handler = scenario
     dialer = Dialer(settings, ari_client, session_manager, panel_client=panel_client)

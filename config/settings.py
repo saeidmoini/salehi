@@ -76,6 +76,7 @@ class OperatorSettings:
 @dataclass
 class DialerSettings:
     outbound_trunk: str
+    outbound_numbers: List[str]
     default_caller_id: str
     origination_timeout: int
     max_concurrent_calls: int
@@ -106,6 +107,14 @@ class TimeoutSettings:
 
 
 @dataclass
+class SMSSettings:
+    api_key: str
+    sender: str
+    admins: List[str]
+    fail_alert_threshold: int
+
+
+@dataclass
 class Settings:
     ari: AriSettings
     gapgpt: GapGPTSettings
@@ -116,6 +125,7 @@ class Settings:
     audio: AudioSettings
     concurrency: ConcurrencySettings
     timeouts: TimeoutSettings
+    sms: SMSSettings
     log_level: str
 
 
@@ -162,6 +172,7 @@ def get_settings() -> Settings:
 
     dialer = DialerSettings(
         outbound_trunk=os.getenv("OUTBOUND_TRUNK", "TO-CUCM-Gaptel"),
+        outbound_numbers=_parse_list(os.getenv("OUTBOUND_NUMBERS", "")),
         default_caller_id=os.getenv("DEFAULT_CALLER_ID", "1000"),
         origination_timeout=int(os.getenv("ORIGINATION_TIMEOUT", "30")),
         max_concurrent_calls=int(os.getenv("MAX_CONCURRENT_CALLS", "2")),
@@ -207,6 +218,13 @@ def get_settings() -> Settings:
         ari_timeout=float(os.getenv("ARI_TIMEOUT", "10")),
     )
 
+    sms = SMSSettings(
+        api_key=os.getenv("SMS_API_KEY", ""),
+        sender=os.getenv("SMS_FROM", ""),
+        admins=_parse_list(os.getenv("SMS_ADMINS", "")),
+        fail_alert_threshold=int(os.getenv("FAIL_ALERT_THRESHOLD", "5")),
+    )
+
     log_level = os.getenv("LOG_LEVEL", "INFO")
 
     return Settings(
@@ -219,5 +237,6 @@ def get_settings() -> Settings:
         audio=audio,
         concurrency=concurrency,
         timeouts=timeouts,
+        sms=sms,
         log_level=log_level,
     )

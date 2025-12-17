@@ -22,7 +22,7 @@ class SessionManager:
     Manages sessions, bridges, and routing of ARI events into scenario logic.
     """
 
-    def __init__(self, ari_client: AriClient, scenario_handler):
+    def __init__(self, ari_client: AriClient, scenario_handler, allowed_inbound_numbers: Optional[list[str]] = None):
         self.ari_client = ari_client
         self.scenario_handler = scenario_handler
         self.sessions: Dict[str, Session] = {}
@@ -30,6 +30,7 @@ class SessionManager:
         self.playback_to_session: Dict[str, str] = {}
         self.recording_to_session: Dict[str, str] = {}
         self.lock = asyncio.Lock()
+        self.allowed_inbound_numbers = {self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n}
 
     async def create_outbound_session(
         self, contact_number: str, metadata: Optional[Dict[str, str]] = None
@@ -166,8 +167,31 @@ class SessionManager:
                 if caller_num:
                     session.metadata["caller_number"] = caller_num
                     session.metadata["contact_number"] = caller_num
+                called_num = channel.get("connected", {}).get("number") or channel.get("dialplan", {}).get("exten")
+                divert_header = None
             async with self.lock:
                 self.sessions[session_id] = session
+            # Reject inbound if called number not in allowed list (our own numbers).
+            divert_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
+            called_candidates = [called_num]
+            if divert_header:
+                called_candidates.append(self._extract_number_from_header(divert_header))
+            allowed = not self.allowed_inbound_numbers or any(
+                self._normalize_number(num) in self.allowed_inbound_numbers for num in called_candidates if num
+            )
+            if not allowed:
+                logger.info(
+                    "Rejecting inbound channel %s not in allowed numbers; caller=%s called=%s divert=%s",
+                    channel_id,
+                    caller_num,
+                    called_num,
+                    divert_header,
+                )
+                try:
+                    await self.ari_client.hangup_channel(channel_id, reason="rejected")
+                except Exception:
+                    pass
+                return
             await self._index_channel(session_id, channel_id)
             await self._ensure_bridge(session)
             if session.bridge and channel_id:
@@ -350,6 +374,20 @@ class SessionManager:
             if leg and leg.channel_id == channel_id:
                 return leg
         return None
+
+    @staticmethod
+    def _normalize_number(number: Optional[str]) -> Optional[str]:
+        if not number:
+            return None
+        digits = "".join(ch for ch in number if ch.isdigit())
+        return digits or None
+
+    @staticmethod
+    def _extract_number_from_header(header: Optional[str]) -> Optional[str]:
+        if not header:
+            return None
+        # crude parse: find digits in header
+        return SessionManager._normalize_number(header)
 
     async def _maybe_mark_answered(self, session: Session, leg: CallLeg, channel_state: Optional[str]) -> None:
         if channel_state == "Up":
