@@ -186,7 +186,6 @@ class SessionManager:
             divert = await self._get_header(channel_id, "Diversion")
             pai = await self._get_header(channel_id, "P-Asserted-Identity")
             to_header = await self._get_header(channel_id, "To")
-            called_candidates.append(self._extract_number_from_header(to_header))
             logger.info(
                 "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s to=%s",
                 channel_id,
