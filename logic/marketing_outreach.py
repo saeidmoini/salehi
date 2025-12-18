@@ -9,7 +9,7 @@ from core.ari_client import AriClient
 from integrations.panel.client import PanelClient
 from llm.client import GapGPTClient
 from logic.base import BaseScenario
-from sessions.session import CallLeg, LegDirection, Session
+from sessions.session import CallLeg, LegDirection, LegState, Session
 from sessions.session_manager import SessionManager
 from stt_tts.vira_stt import STTResult, ViraSTTClient
 
@@ -129,6 +129,16 @@ class MarketingScenario(BaseScenario):
             await self._hangup(session)
 
     async def on_call_failed(self, session: Session, reason: str) -> None:
+        operator_failed = session.operator_leg and session.operator_leg.state == LegState.FAILED
+        if operator_failed:
+            await self._stop_onhold_playbacks(session)
+            # If user said yes but operator failed, mark disconnected; otherwise hangup.
+            async with session.lock:
+                yes_intent = session.metadata.get("intent_yes") == "1"
+            result_value = "disconnected" if yes_intent else "hangup"
+            await self._set_result(session, result_value, force=True, report=True)
+            await self._hangup(session)
+            return
         # Customer leg failed/busy/unanswered => missed
         result_value = "missed"
         await self._set_result(session, result_value, force=True, report=True)
@@ -158,6 +168,7 @@ class MarketingScenario(BaseScenario):
             else:
                 await self._set_result(session, session.result or "failed:hangup", force=True, report=True)
         logger.debug("Call hangup signaled for session %s", session.session_id)
+        await self._stop_onhold_playbacks(session)
 
     async def on_call_finished(self, session: Session) -> None:
         async with session.lock:
