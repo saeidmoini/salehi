@@ -366,16 +366,15 @@ class Dialer:
         logger.info("Queued %d contacts from panel batch %s", len(items), batch_id)
 
     async def _available_capacity(self) -> int:
-        available = 0
+        available_slots = 0
         for line, stats in self.line_stats.items():
             if not line:
                 continue
             self._prune_line_attempts(stats)
-            if stats["active"] >= self.settings.dialer.max_concurrent_calls:
-                continue
-            if len(stats["attempts"]) >= self.settings.dialer.max_calls_per_minute:
-                continue
-            if stats["daily"] >= self.settings.dialer.max_calls_per_day:
-                continue
-            available += 1
-        return available
+            remaining_concurrency = self.settings.dialer.max_concurrent_calls - stats["active"]
+            remaining_per_minute = self.settings.dialer.max_calls_per_minute - len(stats["attempts"])
+            remaining_daily = self.settings.dialer.max_calls_per_day - stats["daily"]
+            line_slots = min(remaining_concurrency, remaining_per_minute, remaining_daily)
+            if line_slots > 0:
+                available_slots += line_slots
+        return max(0, available_slots)
