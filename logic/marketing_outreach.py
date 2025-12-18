@@ -141,6 +141,7 @@ class MarketingScenario(BaseScenario):
         no_intent = False
         app_hangup = False
         async with session.lock:
+            session.metadata["hungup"] = "1"
             operator_connected = session.metadata.get("operator_connected") == "1"
             yes_intent = session.metadata.get("intent_yes") == "1"
             no_intent = session.metadata.get("intent_no") == "1"
@@ -170,6 +171,9 @@ class MarketingScenario(BaseScenario):
 
     # Prompt handling -----------------------------------------------------
     async def _play_prompt(self, session: Session, prompt_key: str) -> None:
+        async with session.lock:
+            if session.metadata.get("hungup") == "1":
+                return
         media = self.prompt_media[prompt_key]
         channel_id = self._customer_channel_id(session)
         if not channel_id:
@@ -225,6 +229,9 @@ class MarketingScenario(BaseScenario):
             session.metadata["recording_phase"] = phase
             session.metadata["recording_name"] = recording_name
         logger.info("Recording %s response for session %s", phase, session.session_id)
+        async with session.lock:
+            if session.metadata.get("hungup") == "1":
+                return
         try:
             if session.bridge and session.bridge.bridge_id:
                 await self.ari_client.record_bridge(
@@ -266,6 +273,8 @@ class MarketingScenario(BaseScenario):
             if recording_name in session.processed_recordings:
                 return
             session.processed_recordings.add(recording_name)
+            if session.metadata.get("hungup") == "1":
+                return
         on_yes, on_no = self._callbacks_for_phase(phase)
         logger.warning(
             "Recording failed (phase=%s) for session %s cause=%s", phase, session.session_id, cause
@@ -285,6 +294,9 @@ class MarketingScenario(BaseScenario):
             stt_result: STTResult = await self.stt_client.transcribe_audio(
                 audio_bytes, hotwords=self.stt_hotwords
             )
+            async with session.lock:
+                if session.metadata.get("hungup") == "1":
+                    return
             transcript = stt_result.text.strip()
             logger.info(
                 "STT result (%s) for session %s: %s (status=%s)",
@@ -382,6 +394,9 @@ class MarketingScenario(BaseScenario):
             await self._report_result(session)
 
     async def _handle_yes(self, session: Session) -> None:
+        async with session.lock:
+            if session.metadata.get("hungup") == "1":
+                return
         # If customer leg is already gone, skip operator flow.
         if not self._customer_channel_id(session):
             logger.debug("Skipping yes handling; customer channel missing for session %s", session.session_id)
@@ -423,6 +438,9 @@ class MarketingScenario(BaseScenario):
     # Operator bridge -----------------------------------------------------
     async def _connect_to_operator(self, session: Session) -> None:
         async with session.lock:
+            if session.metadata.get("hungup") == "1":
+                logger.debug("Skip operator connect; session %s already hung up", session.session_id)
+                return
             if session.metadata.get("operator_call_started") == "1":
                 logger.debug("Operator call already started for session %s; skipping", session.session_id)
                 return
