@@ -68,6 +68,7 @@ class MarketingScenario(BaseScenario):
             "کنم","حالا", "شما", "یه", "بدید"
         ]
         self.negative_logger = self._build_negative_logger()
+        self.positive_logger = self._build_positive_logger()
 
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
@@ -325,6 +326,7 @@ class MarketingScenario(BaseScenario):
             if intent == "number_question":
                 await self._handle_number_question(session)
             elif intent == "yes":
+                self._log_positive(session, transcript, phase)
                 await on_yes(session)
             elif intent == "no":
                 self._log_negative(session, transcript, phase)
@@ -564,6 +566,24 @@ class MarketingScenario(BaseScenario):
 
     def _log_negative(self, session: Session, transcript: str, phase: str) -> None:
         self.negative_logger.info(
+            "session=%s phase=%s transcript=%s", session.session_id, phase, transcript
+        )
+
+    def _build_positive_logger(self) -> logging.Logger:
+        pos_logger = logging.getLogger("logic.positives")
+        if not pos_logger.handlers:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            handler = RotatingFileHandler(log_dir / "positive_stt.log", maxBytes=2 * 1024 * 1024, backupCount=3)
+            formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+            handler.setFormatter(formatter)
+            pos_logger.addHandler(handler)
+            pos_logger.setLevel(logging.INFO)
+            pos_logger.propagate = False
+        return pos_logger
+
+    def _log_positive(self, session: Session, transcript: str, phase: str) -> None:
+        self.positive_logger.info(
             "session=%s phase=%s transcript=%s", session.session_id, phase, transcript
         )
 
