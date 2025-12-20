@@ -256,8 +256,9 @@ class SessionManager:
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
         channel_id = channel.get("id")
-        cause = channel.get("cause")
-        cause_txt = channel.get("cause_txt")
+        # ARI sometimes provides cause/cause_txt on the event or on the channel payload.
+        cause = event.get("cause") or channel.get("cause")
+        cause_txt = event.get("cause_txt") or channel.get("cause_txt")
         session = await self._get_session_by_channel(channel_id)
         if not session:
             return
