@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -133,6 +134,8 @@ class MarketingScenario(BaseScenario):
             logger.info("Operator leg answered for session %s", session.session_id)
             return
 
+        async with session.lock:
+            session.metadata["answered_at"] = str(time.time())
         logger.info("Call answered for session %s (customer)", session.session_id)
         await self._play_prompt(session, "hello")
 
@@ -459,6 +462,7 @@ class MarketingScenario(BaseScenario):
             return
         async with session.lock:
             session.metadata["intent_yes"] = "1"
+            session.metadata["yes_at"] = str(time.time())
         await self._play_prompt(session, "yes")
 
     async def _handle_no(self, session: Session) -> None:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -35,6 +36,7 @@ class SessionManager:
         # Inbound is allowed for all; we keep the set for future use but do not gate.
         self.allowed_inbound_numbers = {self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n}
         self.hangup_logger = logging.getLogger("sessions.hangups")
+        self.userdrop_logger = logging.getLogger("sessions.userdrop")
         self._ensure_hangup_log_handler()
 
     def _ensure_hangup_log_handler(self) -> None:
@@ -49,6 +51,14 @@ class SessionManager:
         handler.setFormatter(formatter)
         self.hangup_logger.addHandler(handler)
         # Keep propagate=True so it still hits the main app.log.
+
+        # Dedicated log for user/disconnected timing analysis.
+        for handler in self.userdrop_logger.handlers:
+            if isinstance(handler, RotatingFileHandler) and getattr(handler, "baseFilename", "").endswith("userdrop.log"):
+                return
+        user_handler = RotatingFileHandler(log_dir / "userdrop.log", maxBytes=2 * 1024 * 1024, backupCount=3)
+        user_handler.setFormatter(formatter)
+        self.userdrop_logger.addHandler(user_handler)
 
     async def create_outbound_session(
         self, contact_number: str, metadata: Optional[Dict[str, str]] = None
@@ -283,6 +293,23 @@ class SessionManager:
             cause_txt,
             session.result,
         )
+        # Detailed timing for customer leg hangups (user drops / disconnects).
+        if leg and leg.direction == LegDirection.OUTBOUND:
+            now = time.time()
+            answered_at = float(session.metadata.get("answered_at", "0") or 0)
+            yes_at = float(session.metadata.get("yes_at", "0") or 0)
+            t_answer_to_hang = now - answered_at if answered_at else None
+            t_yes_to_hang = now - yes_at if yes_at else None
+            self.userdrop_logger.info(
+                "UserDrop session=%s contact=%s result=%s cause=%s cause_txt=%s t_answer_to_hang=%s t_yes_to_hang=%s",
+                session.session_id,
+                session.metadata.get("contact_number"),
+                session.result,
+                cause,
+                cause_txt,
+                f\"{t_answer_to_hang:.3f}\" if t_answer_to_hang is not None else \"na\",
+                f\"{t_yes_to_hang:.3f}\" if t_yes_to_hang is not None else \"na\",
+            )
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)
