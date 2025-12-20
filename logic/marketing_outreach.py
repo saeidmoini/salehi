@@ -358,33 +358,26 @@ class MarketingScenario(BaseScenario):
             "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
             "برای کسی دیگه می‌خوام", "بفرستید کسی دیگه خواست شماره تون رو میدم",
         }
-        number_question_phrases = [
-            "شماره منو از کجا آوردی",
-            "شماره منو از کجا آوردین",
-            "شماره من را از کجا آوردی",
-            "شماره را از کجا آوردید",
-            "شماره از کجا آوردی",
-            "شماره از کجا آوردید",
-            "از کجا آوردی",
-            "از کجا آوردین",
-            "کجا آوردی",
-            "کجا آوردید",
-        ]
-        if any(phrase in text for phrase in number_question_phrases):
-            return "number_question"
-
         if self.llm_client.api_key:
             # Provide intent examples to the LLM so it understands what we treat as yes/no.
             positive_examples = list(yes_tokens)[:30]  # keep prompt concise
             negative_examples = list(no_tokens)[:20]
+            number_q_examples = [
+                "شماره منو از کجا آوردی",
+                "شماره منو از کجا آوردین",
+                "شماره من را از کجا آوردی",
+                "شماره را از کجا آوردید",
+                "شماره از کجا آوردی",
+            ]
             prompt = (
                 "You are a fast classifier for call-center intents. "
-                "Reply with only 'yes', 'no', or 'unknown'. "
+                "Reply with only 'yes', 'no', 'number_question', or 'unknown'. "
                 "Treat these as YES intents (examples): "
                 f"{'; '.join(positive_examples)}. "
                 "Treat these as NO intents (examples): "
                 f"{'; '.join(negative_examples)}. "
-                "If the user asks where their number came from, that is unknown (handled elsewhere). "
+                "Treat these as NUMBER_QUESTION intents (examples): "
+                f"{'; '.join(number_q_examples)}. "
                 f"User said: \"{transcript}\""
             )
             try:
@@ -398,6 +391,8 @@ class MarketingScenario(BaseScenario):
                     return "yes"
                 if "no" in normalized:
                     return "no"
+                if "number_question" in normalized or "number question" in normalized:
+                    return "number_question"
             except Exception as exc:
                 logger.warning("LLM intent fallback failed: %s", exc)
         return "unknown"
