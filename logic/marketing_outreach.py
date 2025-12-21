@@ -439,6 +439,7 @@ class MarketingScenario(BaseScenario):
                 "Treat these as NUMBER_QUESTION intents (examples): "
                 f"{'; '.join(number_q_examples)}. "
                 "If the user is asking any question or requesting information (price, where, how, send info, etc.), treat it as YES unless they are asking where we got their number (then NUMBER_QUESTION). "
+                "If the user mentions any language by name (English, IELTS, German, French, Turkish, Arabic, etc.), treat it as YES/interest. "
                 f"User said: \"{transcript}\""
             )
             try:
