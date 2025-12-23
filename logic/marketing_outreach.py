@@ -466,17 +466,12 @@ class MarketingScenario(BaseScenario):
                 "شماره از کجا آوردی",
             ]
             prompt = (
-                "You are a fast classifier for call-center intents. "
-                "Reply with only 'yes', 'no', 'number_question', or 'unknown'. "
-                "Treat these as YES intents (examples): "
-                f"{'; '.join(positive_examples)}. "
-                "Treat these as NO intents (examples): "
-                f"{'; '.join(negative_examples)}. "
-                "Treat these as NUMBER_QUESTION intents (examples): "
-                f"{'; '.join(number_q_examples)}. "
-                "If the user is asking any question or requesting information (price, where, how, send info, etc.), treat it as YES unless they are asking where we got their number (then NUMBER_QUESTION). "
-                "If the user mentions any language by name (English, IELTS, German, French, Turkish, Arabic, etc.), treat it as YES/interest. "
-                f"User said: \"{transcript}\""
+                "Classify intent into one word: yes / no / number_question / unknown.\n"
+                "YES = interest or any question about price/place/time/links/who/where/how, any language mentioned, requests for info.\n"
+                "Examples YES: " + "; ".join(positive_examples) + ".\n"
+                "NO = reject/decline/not interested. Examples NO: " + "; ".join(negative_examples) + ".\n"
+                "NUMBER_QUESTION = asks where we got their number. Examples: " + "; ".join(number_q_examples) + ".\n"
+                f"User: {transcript}"
             )
             try:
                 result = await self.llm_client.chat(
