@@ -380,6 +380,21 @@ class MarketingScenario(BaseScenario):
                 await self._handle_no_response(session, phase, on_yes, on_no, reason="intent_unknown")
         except Exception as exc:
             logger.exception("Transcription failed (%s) for session %s: %s", phase, session.session_id, exc)
+            # If Vira returned balance error, pause dialer and alert immediately.
+            msg = str(exc)
+            if "balanceError" in msg or "credit is below the set threshold" in msg:
+                async with session.lock:
+                    session.metadata["panel_last_status"] = "FAILED"
+                if self.dialer:
+                    await self.dialer.on_result(
+                        session.session_id,
+                        "failed:stt_balance",
+                        session.metadata.get("number_id"),
+                        session.metadata.get("contact_number"),
+                        session.metadata.get("batch_id"),
+                        session.metadata.get("attempted_at"),
+                    )
+            await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
             await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
 
     async def _detect_intent(self, transcript: str) -> str:
