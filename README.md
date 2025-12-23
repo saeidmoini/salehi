@@ -27,14 +27,14 @@ Note: Ensure `AST_SOUND_DIR` points to your actual Asterisk custom sounds path (
 ## Configuration
 Set via environment or `.env`:
 - ARI: `ARI_BASE_URL`, `ARI_WS_URL`, `ARI_APP_NAME`, `ARI_USERNAME`, `ARI_PASSWORD`
-- Dialer/lines: `OUTBOUND_TRUNK`, `OUTBOUND_NUMBERS` (comma-separated lines), `DEFAULT_CALLER_ID`, `ORIGINATION_TIMEOUT`, `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`, `DIALER_BATCH_SIZE`, `DIALER_DEFAULT_RETRY`
+- Dialer/lines: `OUTBOUND_TRUNK`, `OUTBOUND_NUMBERS` (comma-separated lines), `DEFAULT_CALLER_ID`, `ORIGINATION_TIMEOUT`, `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`, `MAX_ORIGINATIONS_PER_SECOND`, `DIALER_BATCH_SIZE`, `DIALER_DEFAULT_RETRY`
 - Contacts: `STATIC_CONTACTS` (comma-separated) when panel is disabled
 - Panel: `PANEL_BASE_URL`, `PANEL_API_TOKEN` (leave empty to disable panel). Panel `call_allowed=false` pauses new outbound; existing calls finish. Inbound results are reported by phone when `number_id` is missing.
 - LLM: `GAPGPT_BASE_URL`, `GAPGPT_API_KEY` (optional; uses gpt-4o-mini)
 - Vira: `VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`, `VIRA_STT_URL`, `VIRA_TTS_URL`
 - Operator bridge: `OPERATOR_EXTENSION`, `OPERATOR_TRUNK`, `OPERATOR_CALLER_ID`, `OPERATOR_TIMEOUT`
 - Concurrency/timeouts: `HTTP_MAX_CONNECTIONS`, `HTTP_TIMEOUT`, `ARI_TIMEOUT`, `STT_TIMEOUT`, `TTS_TIMEOUT`, `LLM_TIMEOUT`, `MAX_PARALLEL_STT`, `MAX_PARALLEL_TTS`, `MAX_PARALLEL_LLM`
-- Global caps (optional; 0 disables): `MAX_CONCURRENT_OUTBOUND_CALLS`, `MAX_CONCURRENT_INBOUND_CALLS`. Per-line caps: `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`. Origination throttle: 3/sec (built-in).
+- Global caps (optional; 0 disables): `MAX_CONCURRENT_OUTBOUND_CALLS`, `MAX_CONCURRENT_INBOUND_CALLS`. Per-line caps: `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`. Origination throttle: configurable via `MAX_ORIGINATIONS_PER_SECOND`.
 - SMS alerts: `SMS_API_KEY`, `SMS_FROM`, `SMS_ADMINS`, `FAIL_ALERT_THRESHOLD` (pauses dialer and notifies after consecutive failures)
 - Logging: `LOG_LEVEL`
 

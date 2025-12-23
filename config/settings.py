@@ -85,6 +85,7 @@ class DialerSettings:
     max_concurrent_inbound_calls: int
     max_calls_per_minute: int
     max_calls_per_day: int
+    max_originations_per_second: float
     call_window_start: time
     call_window_end: time
     static_contacts: List[str]
@@ -183,6 +184,7 @@ def get_settings() -> Settings:
         max_concurrent_inbound_calls=int(os.getenv("MAX_CONCURRENT_INBOUND_CALLS", os.getenv("MAX_CONCURRENT_CALLS", "2"))),
         max_calls_per_minute=int(os.getenv("MAX_CALLS_PER_MINUTE", "10")),
         max_calls_per_day=int(os.getenv("MAX_CALLS_PER_DAY", "200")),
+        max_originations_per_second=float(os.getenv("MAX_ORIGINATIONS_PER_SECOND", "3")),
         call_window_start=call_window_start,
         call_window_end=call_window_end,
         static_contacts=_parse_list(os.getenv("STATIC_CONTACTS", "")),
