@@ -88,12 +88,12 @@ class Dialer:
                 if not contact:
                     await asyncio.sleep(5)
                     continue
-                # Throttle to max 5 originates per second (global).
+                # Throttle to max 3 originates per second (global).
                 now = asyncio.get_event_loop().time()
                 if now - self.last_originate_window_start >= 1.0:
                     self.last_originate_window_start = now
                     self.originate_count_in_window = 0
-                if self.originate_count_in_window >= 5:
+                if self.originate_count_in_window >= 3:
                     # Sleep until the next second window.
                     await asyncio.sleep(max(0, 1.0 - (now - self.last_originate_window_start)))
                     self.last_originate_window_start = asyncio.get_event_loop().time()
