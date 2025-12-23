@@ -566,7 +566,10 @@ class MarketingScenario(BaseScenario):
             logger.warning("Cannot connect to operator; no customer channel for session %s", session.session_id)
             return
 
-        endpoint = f"PJSIP/{self.settings.operator.extension}@{self.settings.operator.trunk}"
+        endpoint = (
+            self.settings.operator.endpoint
+            or f"PJSIP/{self.settings.operator.extension}@{self.settings.operator.trunk}"
+        )
         app_args = f"operator,{session.session_id},{endpoint}"
         async with session.lock:
             session.metadata["operator_endpoint"] = endpoint

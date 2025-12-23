@@ -71,6 +71,7 @@ class OperatorSettings:
     trunk: str
     caller_id: str
     timeout: int
+    endpoint: str
 
 
 @dataclass
@@ -194,6 +195,7 @@ def get_settings() -> Settings:
         trunk=os.getenv("OPERATOR_TRUNK", os.getenv("OUTBOUND_TRUNK", "TO-CUCM-Gaptel")),
         caller_id=os.getenv("OPERATOR_CALLER_ID", os.getenv("DEFAULT_CALLER_ID", "1000")),
         timeout=int(os.getenv("OPERATOR_TIMEOUT", "30")),
+        endpoint=os.getenv("OPERATOR_ENDPOINT", ""),
     )
 
     panel = PanelSettings(
