@@ -739,7 +739,7 @@ class MarketingScenario(BaseScenario):
 
     def _is_empty_audio(self, audio_bytes: bytes) -> bool:
         """
-        Heuristic: treat as empty if duration <0.4s or normalized RMS < 0.001.
+        Heuristic: treat as empty if duration <0.1s or normalized RMS < 0.001.
         Falls back to byte-length check if parsing fails.
         """
         if not audio_bytes or len(audio_bytes) < 800:
@@ -754,6 +754,6 @@ class MarketingScenario(BaseScenario):
             rms = audioop.rms(data, sampwidth) if frames else 0
             max_amp = 2 ** (8 * sampwidth - 1)
             norm = rms / max_amp if max_amp else 0
-            return duration < 0.4 or norm < 0.001
+            return duration < 0.1 or norm < 0.001
         except Exception:
             return False
