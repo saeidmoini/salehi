@@ -112,6 +112,7 @@ async def async_main() -> None:
     scenario = MarketingScenario(settings, ari_client, llm_client, stt_client, session_manager, panel_client)
     session_manager.scenario_handler = scenario
     dialer = Dialer(settings, ari_client, session_manager, panel_client=panel_client)
+    session_manager.attach_dialer(dialer)
     scenario.attach_dialer(dialer)
 
     ws_client = AriWebSocketClient(settings.ari, session_manager.handle_event)

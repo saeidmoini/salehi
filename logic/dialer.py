@@ -50,6 +50,7 @@ class Dialer:
                 continue
             self.line_stats[norm] = {
                 "active": 0,
+                "inbound_active": 0,
                 "attempts": deque(),
                 "daily": 0,
                 "daily_marker": date.today(),
@@ -68,6 +69,8 @@ class Dialer:
         self.sms_client = SMSClient(settings.sms) if settings.sms.api_key and settings.sms.sender else None
         self.paused_reason = ""
         self.session_line: dict[str, str] = {}
+        self.inbound_session_line: dict[str, str] = {}
+        self.waiting_inbound: dict[str, int] = {}
 
     async def run(self, stop_event: asyncio.Event) -> None:
         if self._running:
@@ -124,9 +127,59 @@ class Dialer:
             line = self.session_line.pop(session_id, None)
             if line and line in self.line_stats:
                 self.line_stats[line]["active"] = max(self.line_stats[line]["active"] - 1, 0)
+            inbound_line = self.inbound_session_line.pop(session_id, None)
+            if inbound_line and inbound_line in self.line_stats:
+                stats = self.line_stats[inbound_line]
+                stats["inbound_active"] = max(stats.get("inbound_active", 0) - 1, 0)
         # reset failure streak on completion unless paused
         if not self.paused_by_failures:
             self.failure_streak = 0
+
+    async def register_inbound_session(self, session_id: str, line: str) -> bool:
+        """
+        Track inbound sessions per line so MAX_CONCURRENT_CALLS applies to combined inbound+outbound.
+        Returns False when the line is already at or above capacity (caller should wait).
+        """
+        async with self.lock:
+            stats = self.line_stats.get(line)
+            if not stats:
+                return True  # unknown line; do not block
+            total_active = self._line_active_total(stats)
+            if total_active >= self.settings.dialer.max_concurrent_calls:
+                self.waiting_inbound[line] = self.waiting_inbound.get(line, 0) + 1
+                return False
+            stats["inbound_active"] = stats.get("inbound_active", 0) + 1
+            self.inbound_session_line[session_id] = line
+            return True
+
+    async def try_register_waiting_inbound(self, session_id: str, line: str) -> bool:
+        """
+        Attempt to promote a waiting inbound call into an active slot.
+        """
+        async with self.lock:
+            stats = self.line_stats.get(line)
+            if not stats:
+                return True
+            total_active = self._line_active_total(stats)
+            if total_active >= self.settings.dialer.max_concurrent_calls:
+                return False
+            stats["inbound_active"] = stats.get("inbound_active", 0) + 1
+            self.inbound_session_line[session_id] = line
+            if line in self.waiting_inbound:
+                self.waiting_inbound[line] = max(0, self.waiting_inbound[line] - 1)
+                if self.waiting_inbound[line] == 0:
+                    del self.waiting_inbound[line]
+            return True
+
+    async def cancel_waiting_inbound(self, line: str) -> None:
+        """
+        Drop a waiting inbound marker when the caller hangs up before being served.
+        """
+        async with self.lock:
+            if line in self.waiting_inbound:
+                self.waiting_inbound[line] = max(0, self.waiting_inbound[line] - 1)
+                if self.waiting_inbound[line] == 0:
+                    del self.waiting_inbound[line]
 
     async def on_result(
         self,
@@ -251,6 +304,9 @@ class Dialer:
         digits = "".join(ch for ch in number if ch.isdigit())
         return digits or None
 
+    def _line_active_total(self, stats: dict) -> int:
+        return stats.get("active", 0) + stats.get("inbound_active", 0)
+
     def _available_line(self) -> Optional[str]:
         now = datetime.utcnow()
         best = None
@@ -259,13 +315,17 @@ class Dialer:
             if not line:
                 continue
             self._prune_line_attempts(stats)
-            if stats["active"] >= self.settings.dialer.max_concurrent_calls:
+            if self.waiting_inbound.get(line, 0) > 0:
+                # Hold outbound when inbound callers are waiting for this line.
+                continue
+            total_active = self._line_active_total(stats)
+            if total_active >= self.settings.dialer.max_concurrent_calls:
                 continue
             if len(stats["attempts"]) >= self.settings.dialer.max_calls_per_minute:
                 continue
             if stats["daily"] >= self.settings.dialer.max_calls_per_day:
                 continue
-            load = (stats["active"], len(stats["attempts"]), stats["daily"])
+            load = (total_active, len(stats["attempts"]), stats["daily"])
             if best_load is None or load < best_load:
                 best = line
                 best_load = load
@@ -387,7 +447,10 @@ class Dialer:
             if not line:
                 continue
             self._prune_line_attempts(stats)
-            remaining_concurrency = self.settings.dialer.max_concurrent_calls - stats["active"]
+            if self.waiting_inbound.get(line, 0) > 0:
+                continue
+            total_active = self._line_active_total(stats)
+            remaining_concurrency = self.settings.dialer.max_concurrent_calls - total_active
             remaining_per_minute = self.settings.dialer.max_calls_per_minute - len(stats["attempts"])
             remaining_daily = self.settings.dialer.max_calls_per_day - stats["daily"]
             line_slots = min(remaining_concurrency, remaining_per_minute, remaining_daily)

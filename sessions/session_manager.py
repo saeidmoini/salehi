@@ -2,9 +2,10 @@ import asyncio
 import logging
 import time
 import uuid
+from collections import deque
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Deque, Dict, Optional, Tuple
 
 from core.ari_client import AriClient
 from sessions.session import (
@@ -39,12 +40,15 @@ class SessionManager:
         self.playback_to_session: Dict[str, str] = {}
         self.recording_to_session: Dict[str, str] = {}
         self.lock = asyncio.Lock()
-        # Inbound is allowed for all; we keep the set for future use but do not gate.
-        self.allowed_inbound_numbers = {self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n}
+        # Inbound is allowed for all; we keep the set for mapping/priority.
+        self.inbound_lines = [self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n]
+        self.allowed_inbound_numbers = {norm for norm in self.inbound_lines if norm}
         self.max_inbound_calls = max_inbound_calls
         self.hangup_logger = logging.getLogger("sessions.hangups")
         self.userdrop_logger = logging.getLogger("sessions.userdrop")
         self._ensure_hangup_log_handler()
+        self.dialer = None
+        self.waiting_inbound: Dict[str, Deque[Tuple[str, str]]] = {}
 
     def _ensure_hangup_log_handler(self) -> None:
         # Add a dedicated rolling log for hangup tracing if not already present.
@@ -194,6 +198,7 @@ class SessionManager:
         else:
             # Inbound calls are keyed by their channel id for the session id.
             session_id = channel_id
+            inbound_line = self._detect_inbound_line(channel)
             # Enforce inbound concurrency limit only if a positive limit is set.
             if self.max_inbound_calls is not None and self.max_inbound_calls > 0:
                 active_inbound = await self.inbound_active_count()
@@ -208,6 +213,16 @@ class SessionManager:
                     except Exception:
                         pass
                     return
+            waiting_for_slot = False
+            if inbound_line and self.dialer:
+                reserved = await self.dialer.register_inbound_session(session_id, inbound_line)
+                waiting_for_slot = not reserved
+                if waiting_for_slot:
+                    logger.info(
+                        "Inbound channel %s queued for line %s (capacity full); will answer when free",
+                        channel_id,
+                        inbound_line,
+                    )
             session = Session(session_id=session_id)
             async with session.lock:
                 session.inbound_leg = CallLeg(
@@ -215,43 +230,27 @@ class SessionManager:
                     direction=direction,
                     endpoint=channel.get("caller", {}).get("number", "unknown"),
                 )
-                session.status = SessionStatus.RINGING
+                session.status = SessionStatus.RINGING if not waiting_for_slot else SessionStatus.INITIATING
                 caller_num = channel.get("caller", {}).get("number")
                 if caller_num:
                     session.metadata["caller_number"] = caller_num
                     session.metadata["contact_number"] = caller_num
                 called_num = channel.get("connected", {}).get("number") or channel.get("dialplan", {}).get("exten")
                 divert_header = None
+                if inbound_line:
+                    session.metadata["inbound_line"] = inbound_line
+                if waiting_for_slot:
+                    session.metadata["inbound_waiting"] = "1"
             async with self.lock:
                 self.sessions[session_id] = session
             await self._index_channel(session_id, channel_id)
             await self._ensure_bridge(session)
             if session.bridge and channel_id:
                 await self.ari_client.add_channel_to_bridge(session.bridge.bridge_id, channel_id)
-            # Auto-answer inbound leg to run the same scenario as outbound.
-            try:
-                await self.ari_client.answer_channel(channel_id)
-            except Exception as exc:
-                logger.warning("Failed to answer inbound channel %s: %s", channel_id, exc)
-            await self._maybe_mark_answered(session, session.inbound_leg, channel_state)
-            if self.scenario_handler:
-                await self.scenario_handler.on_inbound_channel_created(session)
-            divert = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
-            pai = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(P-Asserted-Identity)")
-            logger.info(
-                "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s",
-                channel_id,
-                session_id,
-                session.metadata.get("caller_number"),
-                divert,
-                pai,
-            )
-            if divert or pai:
-                async with session.lock:
-                    if divert:
-                        session.metadata["diversion"] = divert
-                    if pai:
-                        session.metadata["p_asserted_identity"] = pai
+            if waiting_for_slot:
+                await self._queue_waiting_inbound(inbound_line, session_id, channel_id)
+                return
+            await self._accept_inbound(session, channel_id, channel_state)
 
     async def _handle_channel_state_change(self, event: dict) -> None:
         channel = event.get("channel", {})
@@ -412,6 +411,11 @@ class SessionManager:
                     del self.recording_to_session[recording_name]
             self.sessions.pop(session.session_id, None)
 
+        # If this session was waiting for capacity, clear its marker.
+        waiting_line = await self._remove_from_waiting(session.session_id)
+        if waiting_line and self.dialer:
+            await self.dialer.cancel_waiting_inbound(waiting_line)
+
         if session.bridge:
             try:
                 await self.ari_client.delete_bridge(session.bridge.bridge_id)
@@ -422,6 +426,18 @@ class SessionManager:
                     session.session_id,
                     exc,
                 )
+        if self.dialer:
+            try:
+                await self.dialer.on_session_completed(session.session_id)
+            except Exception as exc:
+                logger.debug(
+                    "Failed to notify dialer of session cleanup for %s: %s",
+                    session.session_id,
+                    exc,
+                )
+        inbound_line = session.metadata.get("inbound_line") or session.metadata.get("outbound_line")
+        if inbound_line:
+            await self._try_start_waiting_inbound(inbound_line)
         logger.info("Cleaned session %s", session.session_id)
 
     async def active_sessions_count(self) -> int:
@@ -439,7 +455,9 @@ class SessionManager:
         return sum(
             1
             for s in sessions
-            if s.inbound_leg is not None and s.status in active_states
+            if s.inbound_leg is not None
+            and s.status in active_states
+            and s.metadata.get("inbound_waiting") != "1"
         )
 
     def _detect_direction(self, args: list) -> LegDirection:
@@ -450,6 +468,136 @@ class SessionManager:
         if args[0] == "operator":
             return LegDirection.OPERATOR
         return LegDirection.INBOUND
+
+    def attach_dialer(self, dialer) -> None:
+        """
+        Provide dialer access so inbound calls can share per-line concurrency with outbound.
+        """
+        self.dialer = dialer
+
+    def _detect_inbound_line(self, channel: dict) -> Optional[str]:
+        """
+        Attempt to map an inbound channel to a configured line number.
+        """
+        candidates = [
+            channel.get("connected", {}).get("number"),
+            channel.get("dialplan", {}).get("exten"),
+        ]
+        for raw in candidates:
+            norm = self._normalize_number(raw)
+            if not norm:
+                continue
+            match = self._match_line_number(norm)
+            if match:
+                return match
+        return None
+
+    async def _accept_inbound(self, session: Session, channel_id: str, channel_state: Optional[str]) -> None:
+        # Auto-answer inbound leg to run the same scenario as outbound.
+        try:
+            await self.ari_client.answer_channel(channel_id)
+        except Exception as exc:
+            logger.warning("Failed to answer inbound channel %s: %s", channel_id, exc)
+        await self._maybe_mark_answered(session, session.inbound_leg, channel_state)
+        if self.scenario_handler:
+            await self.scenario_handler.on_inbound_channel_created(session)
+        divert = await self._get_header(channel_id, "Diversion")
+        pai = await self._get_header(channel_id, "P-Asserted-Identity")
+        logger.info(
+            "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s",
+            channel_id,
+            session.session_id,
+            session.metadata.get("caller_number"),
+            divert,
+            pai,
+        )
+        if divert or pai:
+            async with session.lock:
+                if divert:
+                    session.metadata["diversion"] = divert
+                if pai:
+                    session.metadata["p_asserted_identity"] = pai
+
+    async def _queue_waiting_inbound(self, line: str, session_id: str, channel_id: str) -> None:
+        async with self.lock:
+            queue = self.waiting_inbound.setdefault(line, deque())
+            queue.append((session_id, channel_id))
+
+    async def _get_header(self, channel_id: str, name: str) -> Optional[str]:
+        """
+        Try PJSIP then SIP header functions; suppress errors if not available.
+        """
+        header = await self.ari_client.get_channel_variable(
+            channel_id, f"PJSIP_HEADER(read,{name})"
+        )
+        if header:
+            return header
+        return await self.ari_client.get_channel_variable(channel_id, f"SIP_HEADER({name})")
+
+    async def _remove_from_waiting(self, session_id: str) -> Optional[str]:
+        async with self.lock:
+            for line, queue in list(self.waiting_inbound.items()):
+                for sid, ch_id in list(queue):
+                    if sid == session_id:
+                        try:
+                            queue.remove((sid, ch_id))
+                        except ValueError:
+                            pass
+                        if not queue:
+                            del self.waiting_inbound[line]
+                        return line
+        return None
+
+    async def _try_start_waiting_inbound(self, line: str) -> None:
+        if not self.dialer:
+            return
+        while True:
+            async with self.lock:
+                queue = self.waiting_inbound.get(line)
+                item: Optional[Tuple[str, str]] = queue[0] if queue else None
+            if not item:
+                return
+            session_id, channel_id = item
+            promoted = await self.dialer.try_register_waiting_inbound(session_id, line)
+            if not promoted:
+                # Still full; keep waiting.
+                return
+            async with self.lock:
+                queue = self.waiting_inbound.get(line)
+                if queue and queue and queue[0][0] == session_id:
+                    queue.popleft()
+                    if not queue:
+                        del self.waiting_inbound[line]
+            session = await self.get_session(session_id)
+            if not session:
+                # Session gone; try next if any.
+                await self.dialer.on_session_completed(session_id)
+                continue
+            async with session.lock:
+                session.metadata.pop("inbound_waiting", None)
+                session.status = SessionStatus.RINGING
+            await self._accept_inbound(session, channel_id, None)
+            return
+
+    def _match_line_number(self, norm_candidate: str) -> Optional[str]:
+        """
+        Match an inbound dialed/connected number to a configured outbound line.
+        Accepts exact match, leading-zero trimmed match, or suffix match.
+        """
+        if not self.inbound_lines:
+            return None
+        trimmed_candidate = norm_candidate.lstrip("0")
+        for line in self.inbound_lines:
+            if not line:
+                continue
+            if norm_candidate == line:
+                return line
+            trimmed_line = line.lstrip("0")
+            if trimmed_candidate and trimmed_line and trimmed_candidate == trimmed_line:
+                return line
+            if trimmed_candidate and trimmed_line and trimmed_candidate.endswith(trimmed_line):
+                return line
+        return None
 
     def _find_leg(self, session: Session, channel_id: str) -> Optional[CallLeg]:
         for leg in (session.inbound_leg, session.outbound_leg, session.operator_leg):

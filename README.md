@@ -10,7 +10,7 @@ Outbound/inbound ARI-driven call-control engine for a language academy marketing
 - STT via Vira with ffmpeg pre-processing (denoise/normalize). Enhanced copies are saved under `/var/spool/asterisk/recording/enhanced/` for review. Positive/negative transcripts are logged (`logs/positive_stt.log`, `logs/negative_stt.log`). Empty/very short audio (<0.1s, RMS <0.001, or bytes <800) is treated as caller hangup and skipped.
 - Optional GapGPT (gpt-4o-mini) for intent classification with guided examples.
 - In-memory session manager ready for future Redis-backed storage.
-- Async/await architecture (httpx + websockets) with semaphore-guarded STT/TTS/LLM calls and HTTP connection pooling. Origination throttle: 3 calls/sec; optional global inbound/outbound caps; per-line caps remain.
+- Async/await architecture (httpx + websockets) with semaphore-guarded STT/TTS/LLM calls and HTTP connection pooling. Origination throttle: 3 calls/sec; optional global inbound/outbound caps; per-line concurrency (`MAX_CONCURRENT_CALLS`) is shared across inbound+outbound on each line with inbound priority (outbound pauses while inbound is waiting).
 
 ## Quick Start
 1. Install Python 3.12.
@@ -27,14 +27,14 @@ Note: Ensure `AST_SOUND_DIR` points to your actual Asterisk custom sounds path (
 ## Configuration
 Set via environment or `.env`:
 - ARI: `ARI_BASE_URL`, `ARI_WS_URL`, `ARI_APP_NAME`, `ARI_USERNAME`, `ARI_PASSWORD`
-- Dialer/lines: `OUTBOUND_TRUNK`, `OUTBOUND_NUMBERS` (comma-separated lines), `DEFAULT_CALLER_ID`, `ORIGINATION_TIMEOUT`, `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`, `MAX_ORIGINATIONS_PER_SECOND`, `DIALER_BATCH_SIZE`, `DIALER_DEFAULT_RETRY`
+- Dialer/lines: `OUTBOUND_TRUNK`, `OUTBOUND_NUMBERS` (comma-separated lines), `DEFAULT_CALLER_ID`, `ORIGINATION_TIMEOUT`, `MAX_CONCURRENT_CALLS` (per-line total inbound+outbound), `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`, `MAX_ORIGINATIONS_PER_SECOND`, `DIALER_BATCH_SIZE`, `DIALER_DEFAULT_RETRY`
 - Contacts: `STATIC_CONTACTS` (comma-separated) when panel is disabled
 - Panel: `PANEL_BASE_URL`, `PANEL_API_TOKEN` (leave empty to disable panel). Panel `call_allowed=false` pauses new outbound; existing calls finish. Inbound results are reported by phone when `number_id` is missing.
 - LLM: `GAPGPT_BASE_URL`, `GAPGPT_API_KEY` (optional; uses gpt-4o-mini)
 - Vira: `VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`, `VIRA_STT_URL`, `VIRA_TTS_URL`
 - Operator bridge: `OPERATOR_EXTENSION`, `OPERATOR_TRUNK`, `OPERATOR_CALLER_ID`, `OPERATOR_TIMEOUT`
 - Concurrency/timeouts: `HTTP_MAX_CONNECTIONS`, `HTTP_TIMEOUT`, `ARI_TIMEOUT`, `STT_TIMEOUT`, `TTS_TIMEOUT`, `LLM_TIMEOUT`, `MAX_PARALLEL_STT`, `MAX_PARALLEL_TTS`, `MAX_PARALLEL_LLM`
-- Global caps (optional; 0 disables): `MAX_CONCURRENT_OUTBOUND_CALLS`, `MAX_CONCURRENT_INBOUND_CALLS`. Per-line caps: `MAX_CONCURRENT_CALLS`, `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`. Origination throttle: configurable via `MAX_ORIGINATIONS_PER_SECOND`.
+- Global caps (optional; 0 disables): `MAX_CONCURRENT_OUTBOUND_CALLS`, `MAX_CONCURRENT_INBOUND_CALLS`. Per-line caps: `MAX_CONCURRENT_CALLS` (shared inbound+outbound per line), `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`. Origination throttle: configurable via `MAX_ORIGINATIONS_PER_SECOND`.
 - SMS alerts: `SMS_API_KEY`, `SMS_FROM`, `SMS_ADMINS`, `FAIL_ALERT_THRESHOLD` (pauses dialer and notifies after consecutive failures)
 - Logging: `LOG_LEVEL`
 
