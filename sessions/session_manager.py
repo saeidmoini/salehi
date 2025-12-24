@@ -241,8 +241,10 @@ class SessionManager:
                     session.metadata["inbound_line"] = inbound_line
                 if waiting_for_slot:
                     session.metadata["inbound_waiting"] = "1"
+                caller_num = session.metadata.get("caller_number")
             async with self.lock:
                 self.sessions[session_id] = session
+            await self._update_contact_number(session, caller_num)
             await self._index_channel(session_id, channel_id)
             await self._ensure_bridge(session)
             if session.bridge and channel_id:
@@ -503,6 +505,7 @@ class SessionManager:
             await self.scenario_handler.on_inbound_channel_created(session)
         divert = await self._get_header(channel_id, "Diversion")
         pai = await self._get_header(channel_id, "P-Asserted-Identity")
+        await self._update_contact_number(session, pai, divert)
         logger.info(
             "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s",
             channel_id,
@@ -598,6 +601,41 @@ class SessionManager:
             if trimmed_candidate and trimmed_line and trimmed_candidate.endswith(trimmed_line):
                 return line
         return None
+
+    async def _update_contact_number(self, session: Session, *candidates: Optional[str]) -> None:
+        """
+        Normalize and set the contact number, preferring versions with leading 0.
+        """
+        current_raw = None
+        normalized_current = None
+        async with session.lock:
+            current_raw = session.metadata.get("contact_number")
+            normalized_current = self._normalize_contact_number(current_raw)
+        for cand in candidates:
+            norm = self._normalize_contact_number(cand)
+            if not norm:
+                continue
+            if normalized_current:
+                if (
+                    not normalized_current.startswith("0")
+                    and norm.startswith("0")
+                    and norm.endswith(normalized_current)
+                ):
+                    normalized_current = norm
+                break
+            normalized_current = norm
+            break
+        if normalized_current and normalized_current != current_raw:
+            async with session.lock:
+                session.metadata["contact_number"] = normalized_current
+
+    def _normalize_contact_number(self, value: Optional[str]) -> Optional[str]:
+        digits = self._normalize_number(value)
+        if not digits:
+            return None
+        if len(digits) == 10 and not digits.startswith("0"):
+            return f"0{digits}"
+        return digits
 
     def _find_leg(self, session: Session, channel_id: str) -> Optional[CallLeg]:
         for leg in (session.inbound_leg, session.outbound_leg, session.operator_leg):

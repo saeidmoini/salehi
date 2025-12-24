@@ -7,6 +7,7 @@ from typing import Awaitable, Callable, Optional
 import io
 import wave
 import audioop
+import httpx
 
 from config.settings import Settings
 from core.ari_client import AriClient
@@ -479,15 +480,63 @@ class MarketingScenario(BaseScenario):
                     temperature=0,
                 )
                 normalized = result.strip().lower()
-                if "yes" in normalized:
-                    return "yes"
-                if "no" in normalized:
-                    return "no"
-                if "number_question" in normalized or "number question" in normalized:
-                    return "number_question"
+                intent = self._extract_intent_label(normalized)
+                if intent:
+                    return intent
             except Exception as exc:
                 logger.warning("LLM intent fallback failed: %s", exc)
+                if self._is_llm_quota_error(exc):
+                    await self._handle_llm_quota_error(session, exc)
         return "unknown"
+
+    def _extract_intent_label(self, normalized: str) -> Optional[str]:
+        """
+        Parse LLM output into a clean intent label; avoid substring matches that misclassify.
+        """
+        tokens = [tok.strip(" ,.;!?") for tok in normalized.split() if tok.strip(" ,.;!?")]
+        if tokens:
+            first = tokens[0]
+            if first in {"yes", "y", "yeah", "ok", "okay"}:
+                return "yes"
+            if first in {"no", "nah", "nope"}:
+                return "no"
+        if "number_question" in normalized or "number question" in normalized:
+            return "number_question"
+        return None
+
+    def _is_llm_quota_error(self, exc: Exception) -> bool:
+        """
+        Detect GapGPT quota errors (e.g., pre_consume_token_quota_failed).
+        """
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+            try:
+                data = exc.response.json()
+                err = data.get("error", {})
+                code = err.get("code", "") or err.get("type", "")
+                msg = (err.get("message") or "").lower()
+                if "pre_consume_token_quota_failed" in code or "token quota is not enough" in msg:
+                    return True
+            except Exception:
+                pass
+        msg = str(exc).lower()
+        return "pre_consume_token_quota_failed" in msg or "token quota is not enough" in msg
+
+    async def _handle_llm_quota_error(self, session: Session, exc: Exception) -> None:
+        """
+        Mirror Vira balance handling: mark failure so dialer pauses and SMS/panel alert can fire.
+        """
+        async with session.lock:
+            session.metadata["panel_last_status"] = "FAILED"
+        if not self.dialer:
+            return
+        await self.dialer.on_result(
+            session.session_id,
+            "failed:llm_quota",
+            session.metadata.get("number_id"),
+            session.metadata.get("contact_number"),
+            session.metadata.get("batch_id"),
+            session.metadata.get("attempted_at"),
+        )
 
     # Routing -------------------------------------------------------------
     async def _set_result(self, session: Session, value: str, force: bool = False, report: bool = False) -> None:

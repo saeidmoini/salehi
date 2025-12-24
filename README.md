@@ -10,7 +10,7 @@ Outbound/inbound ARI-driven call-control engine for a language academy marketing
 - STT via Vira with ffmpeg pre-processing (denoise/normalize). Enhanced copies are saved under `/var/spool/asterisk/recording/enhanced/` for review. Positive/negative transcripts are logged (`logs/positive_stt.log`, `logs/negative_stt.log`). Empty/very short audio (<0.1s, RMS <0.001, or bytes <800) is treated as caller hangup and skipped.
 - Optional GapGPT (gpt-4o-mini) for intent classification with guided examples.
 - In-memory session manager ready for future Redis-backed storage.
-- Async/await architecture (httpx + websockets) with semaphore-guarded STT/TTS/LLM calls and HTTP connection pooling. Origination throttle: 3 calls/sec; optional global inbound/outbound caps; per-line concurrency (`MAX_CONCURRENT_CALLS`) is shared across inbound+outbound on each line with inbound priority (outbound pauses while inbound is waiting).
+- Async/await architecture (httpx + websockets) with semaphore-guarded STT/TTS/LLM calls and HTTP connection pooling. Origination throttle: 3 calls/sec; optional global inbound/outbound caps; per-line concurrency (`MAX_CONCURRENT_CALLS`) is shared across inbound+outbound on each line with inbound priority (outbound pauses while inbound is waiting). Vira balance and LLM quota errors mark failures that pause the dialer and notify panel/SMS once thresholds are hit.
 
 ## Quick Start
 1. Install Python 3.12.
