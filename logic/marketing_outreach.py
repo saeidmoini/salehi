@@ -158,8 +158,8 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
-            # Temporary: after yes prompt, mark failed and hang up (skip operator).
-            await self._set_result(session, "failed:yes_forced_hangup", force=True, report=True)
+            # Temporary: after yes prompt, mark as missed (unsuccessful) and hang up (skip operator).
+            await self._set_result(session, "missed", force=True, report=True)
             await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
