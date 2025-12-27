@@ -158,10 +158,9 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
-            await self._play_onhold(session)
-            # Small delay so "yes" finishes cleanly before ringing operator
-            await asyncio.sleep(0.5)
-            await self._connect_to_operator(session)
+            # Temporary: after yes prompt, mark failed and hang up (skip operator).
+            await self._set_result(session, "failed:yes_forced_hangup", force=True, report=True)
+            await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
                 session,
