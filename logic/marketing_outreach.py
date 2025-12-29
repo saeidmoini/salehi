@@ -690,9 +690,10 @@ class MarketingScenario(BaseScenario):
             if operator_mobile:
                 session.metadata["operator_mobile"] = operator_mobile
                 session.metadata["operator_outbound_line"] = outbound_line
-            caller_id = session.metadata.get("contact_number") or (
-                self.dialer._caller_id_for_line(outbound_line) if (operator_mobile and outbound_line and self.dialer) else self.settings.operator.caller_id
-            )
+            if operator_mobile and outbound_line and self.dialer:
+                caller_id = self.dialer._caller_id_for_line(outbound_line)
+            else:
+                caller_id = self.settings.operator.caller_id
             if session.metadata.get("hungup") == "1":
                 logger.debug("Skip operator connect; session %s already hung up", session.session_id)
                 return
