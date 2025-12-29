@@ -10,8 +10,10 @@ SERVICE_NAME="salehi.service"
 echo "[salehi] Updating source in ${APP_DIR}"
 cd "${APP_DIR}"
 
+# Track current branch to pull the matching remote branch (per-env configs)
+BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
 git fetch --all --prune
-git reset --hard origin/main
+git reset --hard "origin/${BRANCH}"
 
 python3 -m venv "${APP_DIR}/venv" || true
 source "${APP_DIR}/venv/bin/activate"
