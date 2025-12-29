@@ -381,6 +381,10 @@ class SessionManager:
             await self._cleanup_session(session)
 
     async def _cleanup_session(self, session: Session) -> None:
+        async with session.lock:
+            if session.metadata.get("cleanup_done") == "1":
+                return
+            session.metadata["cleanup_done"] = "1"
         report = False
         if self.scenario_handler:
             async with session.lock:
