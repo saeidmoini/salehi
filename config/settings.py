@@ -72,6 +72,7 @@ class OperatorSettings:
     caller_id: str
     timeout: int
     endpoint: str
+    mobile_numbers: List[str]
 
 
 @dataclass
@@ -198,6 +199,7 @@ def get_settings() -> Settings:
         caller_id=os.getenv("OPERATOR_CALLER_ID", os.getenv("DEFAULT_CALLER_ID", "1000")),
         timeout=int(os.getenv("OPERATOR_TIMEOUT", "30")),
         endpoint=os.getenv("OPERATOR_ENDPOINT", ""),
+        mobile_numbers=_parse_list(os.getenv("OPERATOR_MOBILE_NUMBERS", "")),
     )
 
     panel = PanelSettings(

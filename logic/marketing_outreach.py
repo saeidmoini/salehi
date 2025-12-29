@@ -47,6 +47,10 @@ class MarketingScenario(BaseScenario):
         self.session_manager = session_manager
         self.panel_client = panel_client
         self.dialer = None
+        # Agent mobiles (optional): round-robin, skip busy
+        self.agent_mobiles = [m for m in settings.operator.mobile_numbers if m]
+        self.agent_busy: set[str] = set()
+        self.agent_cursor = 0
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
         self.prompt_media = {
             "hello": "sound:custom/hello",
@@ -120,6 +124,18 @@ class MarketingScenario(BaseScenario):
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
 
+    def _next_available_agent(self) -> Optional[str]:
+        if not self.agent_mobiles:
+            return None
+        n = len(self.agent_mobiles)
+        for i in range(n):
+            idx = (self.agent_cursor + i) % n
+            mobile = self.agent_mobiles[idx]
+            if mobile not in self.agent_busy:
+                self.agent_cursor = (idx + 1) % n
+                return mobile
+        return None
+
     async def on_outbound_channel_created(self, session: Session) -> None:
         logger.debug("Outbound channel ready for session %s", session.session_id)
 
@@ -158,9 +174,10 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
-            # Temporary: after yes prompt, mark as disconnected (unsuccessful) and hang up (skip operator).
-            await self._set_result(session, "disconnected", force=True, report=True)
-            await self._hangup(session)
+            await self._play_onhold(session)
+            # Small delay so "yes" finishes cleanly before ringing operator
+            await asyncio.sleep(0.5)
+            await self._connect_to_operator(session)
         elif prompt_key == "number":
             await self._capture_response(
                 session,
@@ -224,6 +241,9 @@ class MarketingScenario(BaseScenario):
             if session.result is None:
                 session.result = "user_didnt_answer"
             result = session.result
+            operator_mobile = session.metadata.get("operator_mobile")
+        if operator_mobile:
+            self.agent_busy.discard(operator_mobile)
         logger.info("Call finished session=%s result=%s", session.session_id, result)
         await self._report_result(session)
         if self.dialer:
@@ -616,13 +636,25 @@ class MarketingScenario(BaseScenario):
             logger.warning("Cannot connect to operator; no customer channel for session %s", session.session_id)
             return
 
-        endpoint = (
-            self.settings.operator.endpoint
-            or f"PJSIP/{self.settings.operator.extension}@{self.settings.operator.trunk}"
-        )
+        # Choose operator endpoint: mobiles (round-robin) if provided, else static endpoint/extension.
+        endpoint = ""
+        operator_mobile = None
+        if self.agent_mobiles:
+            operator_mobile = self._next_available_agent()
+            if not operator_mobile:
+                logger.warning("No available operator mobiles to connect session %s", session.session_id)
+                return
+            endpoint = f"PJSIP/{operator_mobile}@{self.settings.operator.trunk}"
+        else:
+            endpoint = (
+                self.settings.operator.endpoint
+                or f"PJSIP/{self.settings.operator.extension}@{self.settings.operator.trunk}"
+            )
         app_args = f"operator,{session.session_id},{endpoint}"
         async with session.lock:
             session.metadata["operator_endpoint"] = endpoint
+            if operator_mobile:
+                session.metadata["operator_mobile"] = operator_mobile
             caller_id = session.metadata.get("contact_number") or self.settings.operator.caller_id
             if session.metadata.get("hungup") == "1":
                 logger.debug("Skip operator connect; session %s already hung up", session.session_id)
@@ -635,6 +667,8 @@ class MarketingScenario(BaseScenario):
                 caller_id=caller_id,
                 timeout=self.settings.operator.timeout,
             )
+            if operator_mobile:
+                self.agent_busy.add(operator_mobile)
         except Exception as exc:
             async with session.lock:
                 session.result = "failed:operator_failed"
