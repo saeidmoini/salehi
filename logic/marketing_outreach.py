@@ -234,13 +234,28 @@ class MarketingScenario(BaseScenario):
         yes_intent = False
         no_intent = False
         app_hangup = False
+        operator_call_started = False
         async with session.lock:
             session.metadata["hungup"] = "1"
             operator_connected = session.metadata.get("operator_connected") == "1"
             yes_intent = session.metadata.get("intent_yes") == "1"
             no_intent = session.metadata.get("intent_no") == "1"
             app_hangup = session.metadata.get("app_hangup") == "1"
+            operator_call_started = session.metadata.get("operator_call_started") == "1"
         if operator_connected:
+            return
+        # If customer hung up while we were still trying to reach an operator, immediately stop that leg.
+        if operator_call_started and session.operator_leg and session.operator_leg.channel_id:
+            try:
+                await self.ari_client.hangup_channel(session.operator_leg.channel_id)
+            except Exception as exc:
+                logger.debug("Failed to hangup pending operator leg for session %s: %s", session.session_id, exc)
+            async with session.lock:
+                session.metadata.pop("operator_mobile", None)
+                session.metadata.pop("operator_outbound_line", None)
+                session.metadata.pop("operator_endpoint", None)
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._stop_onhold_playbacks(session)
             return
         if session.result is None or session.result in {"user_didnt_answer", "missed"}:
             if yes_intent:
