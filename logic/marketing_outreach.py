@@ -223,8 +223,11 @@ class MarketingScenario(BaseScenario):
     async def on_call_failed(self, session: Session, reason: str) -> None:
         operator_failed = session.operator_leg and session.operator_leg.state == LegState.FAILED
         if operator_failed:
+            # Try another agent if available
+            retried = await self._retry_operator_mobile(session, reason)
+            if retried:
+                return
             await self._stop_onhold_playbacks(session)
-            # If user said yes but operator failed, mark disconnected; otherwise hangup.
             async with session.lock:
                 yes_intent = session.metadata.get("intent_yes") == "1"
             result_value = "disconnected" if yes_intent else "hangup"
@@ -341,20 +344,24 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             if session.metadata.get("hungup") == "1":
                 return
+            # track unknown attempts per phase
+            unknown_key = f"unknown_{phase}_count"
+            if unknown_key not in session.metadata:
+                session.metadata[unknown_key] = "0"
         try:
             if session.bridge and session.bridge.bridge_id:
                 await self.ari_client.record_bridge(
                     bridge_id=session.bridge.bridge_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=2,
+                    max_silence=1,
                 )
             else:
                 await self.ari_client.record_channel(
                     channel_id=channel_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=2,
+                    max_silence=1,
                 )
             await self.session_manager.register_recording(session.session_id, recording_name)
         except Exception as exc:
@@ -369,7 +376,12 @@ class MarketingScenario(BaseScenario):
             if recording_name in session.processed_recordings:
                 return
             session.processed_recordings.add(recording_name)
+            alo_key = f"alo_played_{phase}"
+            alo_needed = session.metadata.get(alo_key) != "1"
+            session.metadata[alo_key] = "1"
         on_yes, on_no = self._callbacks_for_phase(phase)
+        if alo_needed:
+            await self._play_prompt(session, "alo")
         asyncio.create_task(
             self._transcribe_response(session, recording_name, phase, on_yes, on_no)
         )
@@ -636,8 +648,18 @@ class MarketingScenario(BaseScenario):
             session.session_id,
         )
         if "intent_unknown" in reason or reason == "unknown":
+            unknown_key = f"unknown_{phase}_count"
+            async with session.lock:
+                count = int(session.metadata.get(unknown_key, "0") or "0")
+                session.metadata[unknown_key] = str(count + 1)
+            if count == 0:
+                await self._play_prompt(session, "repeat")
+                await self._capture_response(session, phase=phase, on_yes=on_yes, on_no=on_no)
+                return
             await self._set_result(session, "not_interested", force=True, report=True)
-        elif "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
+            await self._play_prompt(session, "goodby")
+            return
+        if "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
             await self._set_result(session, f"failed:{reason}", force=True, report=True)
         else:
             await self._set_result(session, "missed", force=False, report=True)
@@ -660,6 +682,7 @@ class MarketingScenario(BaseScenario):
                 logger.debug("Inbound-only session %s; skipping operator connect", session.session_id)
                 return
             session.metadata["operator_call_started"] = "1"
+            session.metadata.pop("operator_tried", None)
         customer_channel = self._customer_channel_id(session)
         if not customer_channel:
             logger.warning("Cannot connect to operator; no customer channel for session %s", session.session_id)
@@ -717,6 +740,54 @@ class MarketingScenario(BaseScenario):
             if outbound_line:
                 await self._release_outbound_line(outbound_line)
             await self._play_prompt(session, "goodby")
+
+    async def _retry_operator_mobile(self, session: Session, reason: str) -> bool:
+        """Attempt another agent mobile on failure. Returns True if retried."""
+        async with session.lock:
+            tried = set((session.metadata.get("operator_tried") or "").split(",")) if session.metadata.get("operator_tried") else set()
+            current_mobile = session.metadata.get("operator_mobile")
+            outbound_line = session.metadata.get("operator_outbound_line")
+        if current_mobile:
+            self.agent_busy.discard(current_mobile)
+            tried.add(current_mobile)
+        if outbound_line:
+            await self._release_outbound_line(outbound_line)
+        next_mobile = self._next_available_agent()
+        while next_mobile and next_mobile in tried:
+            next_mobile = self._next_available_agent()
+        if not next_mobile:
+            logger.warning("Operator retry: no available agents for session %s (reason=%s)", session.session_id, reason)
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._hangup(session)
+            return False
+        outbound_line = await self._reserve_outbound_line()
+        if not outbound_line:
+            logger.warning("Operator retry: no outbound line for session %s", session.session_id)
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._hangup(session)
+            return False
+        endpoint = f"PJSIP/{next_mobile}@{self.settings.dialer.outbound_trunk}"
+        app_args = f"operator,{session.session_id},{endpoint}"
+        caller_id = self.dialer._caller_id_for_line(outbound_line) if self.dialer else self.settings.operator.caller_id
+        async with session.lock:
+            session.metadata["operator_mobile"] = next_mobile
+            session.metadata["operator_outbound_line"] = outbound_line
+            session.metadata["operator_endpoint"] = endpoint
+            session.metadata["operator_tried"] = ",".join(tried | {next_mobile})
+        logger.info("Retrying operator for session %s via %s (reason=%s)", session.session_id, endpoint, reason)
+        try:
+            await self.ari_client.originate_call(
+                endpoint=endpoint,
+                app_args=app_args,
+                caller_id=caller_id,
+                timeout=self.settings.operator.timeout,
+            )
+            self.agent_busy.add(next_mobile)
+            return True
+        except Exception as exc:
+            logger.exception("Operator retry failed for session %s: %s", session.session_id, exc)
+            await self._release_outbound_line(outbound_line)
+            return False
 
     async def _play_processing(self, session: Session) -> None:
         """
