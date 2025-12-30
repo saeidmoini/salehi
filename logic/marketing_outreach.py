@@ -260,8 +260,6 @@ class MarketingScenario(BaseScenario):
             await self._stop_onhold_playbacks(session)
             return
         # If user said no and hung up during goodbye, mark as hangup (not interested already recorded).
-        if no_intent and session.result == "not_interested":
-            await self._set_result(session, "hangup", force=True, report=True)
         # Map cause codes to finer statuses when nothing else is set.
         cause_result = None
         if cause:
