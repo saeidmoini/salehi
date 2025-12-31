@@ -17,10 +17,17 @@ class PanelNumber:
 
 
 @dataclass
+class PanelAgent:
+    id: Optional[int]
+    phone_number: str
+
+
+@dataclass
 class NextBatchResponse:
     call_allowed: bool
     retry_after_seconds: Optional[int]
     numbers: List[PanelNumber]
+    agents: List[PanelAgent]
     batch_id: Optional[str]
     timezone: Optional[str]
     server_time: Optional[datetime]
@@ -65,6 +72,7 @@ class PanelClient:
                     call_allowed=False,
                     retry_after_seconds=retry,
                     numbers=[],
+                    agents=[],
                     batch_id=None,
                     timezone=data.get("timezone"),
                     server_time=self._parse_dt(data.get("server_time")),
@@ -76,10 +84,16 @@ class PanelClient:
                 PanelNumber(id=item["id"], phone_number=item["phone_number"])
                 for item in batch.get("numbers", []) or []
             ]
+            agents = [
+                PanelAgent(id=agent.get("id"), phone_number=agent.get("phone_number", ""))
+                for agent in data.get("active_agents", []) or []
+                if agent.get("phone_number")
+            ]
             return NextBatchResponse(
                 call_allowed=True,
                 retry_after_seconds=None,
                 numbers=numbers,
+                agents=agents,
                 batch_id=batch.get("batch_id"),
                 timezone=data.get("timezone"),
                 server_time=self._parse_dt(data.get("server_time")),
@@ -92,6 +106,7 @@ class PanelClient:
                 call_allowed=False,
                 retry_after_seconds=self.default_retry,
                 numbers=[],
+                agents=[],
                 batch_id=None,
                 timezone=None,
                 server_time=None,
@@ -108,6 +123,9 @@ class PanelClient:
         attempted_at: datetime,
         batch_id: Optional[str] = None,
         call_allowed: Optional[bool] = None,
+        agent_id: Optional[int] = None,
+        agent_phone: Optional[str] = None,
+        user_message: Optional[str] = None,
     ) -> None:
         payload = {
             "number_id": number_id,
@@ -120,6 +138,12 @@ class PanelClient:
             payload["batch_id"] = batch_id
         if call_allowed is not None:
             payload["call_allowed"] = call_allowed
+        if agent_id is not None:
+            payload["agent_id"] = agent_id
+        if agent_phone:
+            payload["agent_phone"] = agent_phone
+        if user_message:
+            payload["user_message"] = user_message
         try:
             resp = await self.client.post("/api/dialer/report-result", json=payload)
             resp.raise_for_status()

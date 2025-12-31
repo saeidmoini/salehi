@@ -49,6 +49,7 @@ class MarketingScenario(BaseScenario):
         self.dialer = None
         # Agent mobiles (optional): round-robin, skip busy
         self.agent_mobiles = [m for m in settings.operator.mobile_numbers if m]
+        self.agent_ids: dict[str, Optional[int]] = {m: None for m in self.agent_mobiles}
         self.agent_busy: set[str] = set()
         self.agent_cursor = 0
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
@@ -123,6 +124,29 @@ class MarketingScenario(BaseScenario):
 
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
+
+    async def set_panel_agents(self, agents: list) -> None:
+        """Replace operator mobiles with panel-provided active_agents."""
+        mobiles: list[str] = []
+        ids: dict[str, Optional[int]] = {}
+        for agent in agents:
+            phone = None
+            agent_id = None
+            if isinstance(agent, dict):
+                phone = agent.get("phone_number")
+                agent_id = agent.get("id")
+            else:
+                phone = getattr(agent, "phone_number", None)
+                agent_id = getattr(agent, "id", None)
+            if phone:
+                mobiles.append(phone)
+                ids[phone] = agent_id
+        if not mobiles:
+            return
+        self.agent_mobiles = mobiles
+        self.agent_ids = ids
+        self.agent_busy.clear()
+        self.agent_cursor = 0
 
     def _next_available_agent(self) -> Optional[str]:
         if not self.agent_mobiles:
@@ -241,14 +265,39 @@ class MarketingScenario(BaseScenario):
         yes_intent = False
         no_intent = False
         app_hangup = False
+        operator_call_started = False
+        cause = None
         async with session.lock:
             session.metadata["hungup"] = "1"
             operator_connected = session.metadata.get("operator_connected") == "1"
             yes_intent = session.metadata.get("intent_yes") == "1"
             no_intent = session.metadata.get("intent_no") == "1"
             app_hangup = session.metadata.get("app_hangup") == "1"
+            operator_call_started = session.metadata.get("operator_call_started") == "1"
+            cause = session.metadata.get("hangup_cause")
         if operator_connected:
             return
+        # If customer hung up while we were still trying to reach an operator, immediately stop that leg.
+        if operator_call_started and session.operator_leg and session.operator_leg.channel_id:
+            try:
+                await self.ari_client.hangup_channel(session.operator_leg.channel_id)
+            except Exception as exc:
+                logger.debug("Failed to hangup pending operator leg for session %s: %s", session.session_id, exc)
+            async with session.lock:
+                session.metadata.pop("operator_mobile", None)
+                session.metadata.pop("operator_outbound_line", None)
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._stop_onhold_playbacks(session)
+            return
+        # Map cause codes to finer statuses when nothing else is set.
+        cause_result = None
+        if cause:
+            if cause in {"17"}:
+                cause_result = "busy"
+            elif cause in {"21"}:
+                cause_result = "banned"
+            elif cause in {"18", "19", "20"}:
+                cause_result = "power_off"
         if session.result is None or session.result in {"user_didnt_answer", "missed"}:
             if yes_intent:
                 await self._set_result(session, "disconnected", force=True, report=True)
@@ -258,6 +307,10 @@ class MarketingScenario(BaseScenario):
                 await self._set_result(session, "hangup", force=True, report=True)
             else:
                 await self._set_result(session, session.result or "failed:hangup", force=True, report=True)
+        if cause_result and (session.result is None or session.result in {"user_didnt_answer", "missed", "hangup", "disconnected"}):
+            await self._set_result(session, cause_result, force=True, report=True)
+            await self._stop_onhold_playbacks(session)
+            return
         logger.debug("Call hangup signaled for session %s", session.session_id)
         await self._stop_onhold_playbacks(session)
 
@@ -635,7 +688,9 @@ class MarketingScenario(BaseScenario):
             session.session_id,
         )
         if "intent_unknown" in reason or reason == "unknown":
-            await self._set_result(session, "not_interested", force=True, report=True)
+            await self._set_result(session, "unknown", force=True, report=True)
+        elif reason == "empty_transcript":
+            await self._set_result(session, "hangup", force=True, report=True)
         elif "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
             await self._set_result(session, f"failed:{reason}", force=True, report=True)
         else:
@@ -689,6 +744,7 @@ class MarketingScenario(BaseScenario):
             if operator_mobile:
                 session.metadata["operator_mobile"] = operator_mobile
                 session.metadata["operator_outbound_line"] = outbound_line
+                session.metadata["operator_agent_id"] = self.agent_ids.get(operator_mobile)
             caller_id = session.metadata.get("contact_number") or (
                 self.dialer._caller_id_for_line(outbound_line) if (operator_mobile and outbound_line and self.dialer) else self.settings.operator.caller_id
             )
@@ -838,6 +894,9 @@ class MarketingScenario(BaseScenario):
         result = session.result or "unknown"
         status = "FAILED"
         reason = result
+        user_message = None
+        if session.responses:
+            user_message = session.responses[-1].get("text")
         if result == "connected_to_operator":
             status = "CONNECTED"
             reason = "User said yes and connected to operator"
@@ -854,11 +913,23 @@ class MarketingScenario(BaseScenario):
             status = "DISCONNECTED"
             reason = "Caller said yes but disconnected before operator answered"
         elif result == "unknown":
-            status = "NOT_INTERESTED"
+            status = "UNKNOWN"
             reason = "Unknown intent"
+        elif result.startswith("failed:stt_failure"):
+            status = "HANGUP"
+            reason = "User hangup (STT could not transcribe)"
         elif result.startswith("failed:") or result == "failed":
             status = "FAILED"
             reason = result
+        elif result == "busy":
+            status = "BUSY"
+            reason = "Line busy or rejected"
+        elif result == "power_off":
+            status = "POWER_OFF"
+            reason = "Unavailable / powered off / no response"
+        elif result == "banned":
+            status = "BANNED"
+            reason = "Rejected by operator"
 
         # Avoid duplicate reports with the same status to panel.
         async with session.lock:
@@ -874,6 +945,9 @@ class MarketingScenario(BaseScenario):
             reason=reason,
             attempted_at=attempted_at,
             batch_id=batch_id,
+            agent_id=session.metadata.get("operator_agent_id"),
+            agent_phone=session.metadata.get("operator_mobile"),
+            user_message=user_message if status in {"UNKNOWN", "DISCONNECTED", "CONNECTED", "NOT_INTERESTED"} else None,
         )
 
     def _is_empty_audio(self, audio_bytes: bytes) -> bool:

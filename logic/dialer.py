@@ -438,6 +438,14 @@ class Dialer:
 
         size = min(self.settings.dialer.batch_size, capacity)
         batch: NextBatchResponse = await self.panel_client.get_next_batch(size=size)
+        # Refresh operator roster from panel active_agents if configured.
+        if self.settings.operator.use_panel_agents and batch.agents:
+            handler = self.session_manager.scenario_handler
+            if handler and hasattr(handler, "set_panel_agents"):
+                try:
+                    await handler.set_panel_agents(batch.agents)
+                except Exception as exc:
+                    logger.warning("Failed to set panel agents: %s", exc)
         if batch.call_allowed and self.paused_by_failures:
             logger.info("Panel re-enabled; resuming dialer after failures.")
             self.paused_by_failures = False
