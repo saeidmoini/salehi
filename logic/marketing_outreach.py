@@ -122,6 +122,7 @@ class MarketingScenario(BaseScenario):
 
         self.negative_logger = self._build_negative_logger()
         self.positive_logger = self._build_positive_logger()
+        self.unknown_logger = self._build_unknown_logger()
 
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
@@ -502,6 +503,7 @@ class MarketingScenario(BaseScenario):
                 self._log_negative(session, transcript, phase)
                 await on_no(session)
             else:
+                self._log_unknown(session, transcript, phase)
                 await self._handle_no_response(session, phase, on_yes, on_no, reason="intent_unknown")
         except Exception as exc:
             logger.exception("Transcription failed (%s) for session %s: %s", phase, session.session_id, exc)
@@ -882,6 +884,24 @@ class MarketingScenario(BaseScenario):
 
     def _log_positive(self, session: Session, transcript: str, phase: str) -> None:
         self.positive_logger.info(
+            "session=%s phase=%s transcript=%s", session.session_id, phase, transcript
+        )
+
+    def _build_unknown_logger(self) -> logging.Logger:
+        unk_logger = logging.getLogger("logic.unknowns")
+        if not unk_logger.handlers:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            handler = RotatingFileHandler(log_dir / "unknown_stt.log", maxBytes=2 * 1024 * 1024, backupCount=3)
+            formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+            handler.setFormatter(formatter)
+            unk_logger.addHandler(handler)
+            unk_logger.setLevel(logging.INFO)
+            unk_logger.propagate = False
+        return unk_logger
+
+    def _log_unknown(self, session: Session, transcript: str, phase: str) -> None:
+        self.unknown_logger.info(
             "session=%s phase=%s transcript=%s", session.session_id, phase, transcript
         )
 
