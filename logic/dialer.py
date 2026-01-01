@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -54,6 +55,7 @@ class Dialer:
                 "attempts": deque(),
                 "daily": 0,
                 "daily_marker": date.today(),
+                "last_originated_ts": 0.0,
             }
         self.attempt_timestamps: Deque[datetime] = deque()  # global per-minute
         self.daily_counter = 0  # global per-day
@@ -287,6 +289,7 @@ class Dialer:
                     stats["active"] += 1
                     stats["attempts"].append(datetime.utcnow())
                     stats["daily"] += 1
+                    stats["last_originated_ts"] = time.monotonic()
                 if not hasattr(self, "session_line"):
                     self.session_line = {}
                 self.session_line[session.session_id] = line
@@ -328,6 +331,7 @@ class Dialer:
 
     def _available_line(self) -> Optional[str]:
         now = datetime.utcnow()
+        now_mono = time.monotonic()
         best = None
         best_load = None
         for line, stats in self.line_stats.items():
@@ -336,6 +340,10 @@ class Dialer:
             self._prune_line_attempts(stats)
             if self.waiting_inbound.get(line, 0) > 0:
                 # Hold outbound when inbound callers are waiting for this line.
+                continue
+            last_ts = stats.get("last_originated_ts", 0.0)
+            if last_ts and now_mono - last_ts < 1.0:
+                # Enforce per-line per-second cap of 1.
                 continue
             total_active = self._line_active_total(stats)
             if total_active >= self.settings.dialer.max_concurrent_calls:
