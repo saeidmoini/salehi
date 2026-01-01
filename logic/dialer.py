@@ -93,19 +93,6 @@ class Dialer:
                 if not contact:
                     await asyncio.sleep(5)
                     continue
-                # Throttle to the configured originates per second (global across lines).
-                rate_limit = self.settings.dialer.max_originations_per_second
-                if rate_limit > 0:
-                    now = asyncio.get_event_loop().time()
-                    if now - self.last_originate_window_start >= 1.0:
-                        self.last_originate_window_start = now
-                        self.originate_count_in_window = 0
-                    if self.originate_count_in_window >= rate_limit:
-                        # Sleep until the next second window.
-                        await asyncio.sleep(max(0, 1.0 - (now - self.last_originate_window_start)))
-                        self.last_originate_window_start = asyncio.get_event_loop().time()
-                        self.originate_count_in_window = 0
-                    self.originate_count_in_window += 1
                 await self._originate(contact)
                 await asyncio.sleep(0.05)
         finally:

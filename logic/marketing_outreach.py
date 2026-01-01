@@ -175,6 +175,7 @@ class MarketingScenario(BaseScenario):
             stats["active"] += 1
             stats["attempts"].append(datetime.utcnow())
             stats["daily"] += 1
+            stats["last_originated_ts"] = time.monotonic()
         self.dialer._record_attempt()
         return line
 
