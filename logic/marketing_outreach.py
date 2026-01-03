@@ -237,9 +237,9 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
-            # On this branch we skip operator transfer: say goodbye and disconnect.
+            # Skip operator transfer: mark disconnected and hang up without playing goodbye.
             await self._set_result(session, "disconnected", force=True, report=True)
-            await self._play_prompt(session, "goodby")
+            await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
                 session,
