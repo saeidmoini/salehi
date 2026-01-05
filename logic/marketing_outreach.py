@@ -61,63 +61,22 @@ class MarketingScenario(BaseScenario):
             "onhold": "sound:custom/onhold",
             "number": "sound:custom/number",
             "processing": "sound:beep",
+            "alo": "sound:custom/alo",
+            "repeat": "sound:custom/repeat",
         }
         # Hotwords to bias STT toward common intents (single words, no phrases).
         self.stt_hotwords = [
-            # Negative / stop tokens
             "نه", "نیاز", "ندارم", "نمیخواهم", "نمیخوام", "ممنون", "ساعت", "زنگ",
-            "وقت", "خصوصی", "شماره", "پاک", "حذف", "بچه", "کسی", "بفرستید",
-            "دیگه", "تماس", "سرکار", "مدرس", "نگیرید",
-
-            # Positive / engaged tokens
-            "بله", "اوکی", "آره", "باشه",
-            "در", "خدمت", "خدمتم", "بفرمایید",
-            "تضمین", "کجا", "کجاست",
-            "قیمت", "قیمتش", "چنده",
-            "سایت", "دارین", "دارید",
-            "نمونه", "تدریس",
-            "آدرس",
-            "ترم", "ترمیکه",
-            "اساتید", "کین",
-            "دوره", "طول", "چقدره",
-            "کتاب",
-            "پایه",
-            "هزینه",
-            "سازمان",
-            "مدرک", "معتبره",
-            "سطح",
-            "مهاجرت",
-            "توضیح", "بدید",
-            "نظر", "میدید",
-            "شروع", "کنم",
-            "حالا", "شما",
-            "می‌خوام",
-            "وصل", "کنید",
-
-            # نحوه برگزاری
-            "برگزار", "چطوری",
-            "آنلاین", "آنلاینه",
-            "آفلاین", "افلاینه",
-            "اپلیکیشن", "اپلیکیشنی",
-
-            # آموزشگاه
-            "آموزشگاه", "اسم",
-            "فیلم", "آموزشی",
-
-            # زبان‌ها و دوره‌ها
-            "ایلتس", "مکالمه", "دکترا",
-            "ترکی", "فرانسه", "آلمانی", "روسی", "چینی", "کره", "عربی",
-
-            # زمان و سابقه
-            "چند", "وقته", "هست",
-
-            # اعتراض به شماره
-            "آوردی", "آوردین", "آوردید", "را",
-
-            # ضمایر و حروف پرکاربرد
-            "من", "با", "تو", "برای", "رو", "تون",
-            "از", "چه", "میشه", "بزن", "الان", "سرکارم", "خودم", "مدرسم",
-            "خواست", "میدم"
+            "وقت", "خصوصی", "شماره", "پاک", "حذف", "کسی", "بفرستید",
+            "دیگه", "تماس", "سرکار", "مدرس", "نگیرید","اوکی", "آره", "باشه",
+            "در", "خدمت", "خدمتم", "بفرمایید","تضمین", "کجا", "کجاست",
+            "قیمت", "قیمتش", "چنده","سایت", "دارین", "دارید","نمونه", "تدریس",
+            "آدرس","ترم","اساتید", "کین","دوره", "طول", "چقدره","هزینه","سازمان",
+            "مدرک", "معتبره","سطح","توضیح", "بدید","نظر", "میدید","شروع", "کنم",
+            "حالا", "شما","می‌خوام","وصل", "کنید","برگزار", "چطوری","آنلاین", "آنلاینه",
+            "آفلاین", "افلاینه","اپلیکیشن", "اپلیکیشنی","آموزشگاه", "اسم","فیلم", "آموزشی",
+            "چند", "وقته", "هست","آوردی", "آوردین", "آوردید", "را","من", "با", "تو", "برای", "رو", "تون",
+            "از", "چه", "میشه", "بزن", "الان", "سرکارم", "خودم", "مدرسم","خواست", "میدم"
         ]
 
         self.negative_logger = self._build_negative_logger()
@@ -237,9 +196,10 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
-            # Skip operator transfer: mark disconnected and hang up without playing goodbye.
-            await self._set_result(session, "disconnected", force=True, report=True)
-            await self._hangup(session)
+            await self._play_onhold(session)
+            # Small delay so "yes" finishes cleanly before ringing operator
+            await asyncio.sleep(0.5)
+            await self._connect_to_operator(session)
         elif prompt_key == "number":
             await self._capture_response(
                 session,
@@ -253,14 +213,24 @@ class MarketingScenario(BaseScenario):
                 operator_connected = session.metadata.get("operator_connected") == "1"
             if not operator_connected:
                 await self._play_onhold(session)
+        elif prompt_key == "repeat":
+            # After repeating the question, capture the response again.
+            phase = "interest"
+            async with session.lock:
+                phase = session.metadata.get("recording_phase") or "interest"
+            on_yes, on_no = self._callbacks_for_phase(phase)
+            await self._capture_response(session, phase=phase, on_yes=on_yes, on_no=on_no)
         elif prompt_key == "goodby":
             await self._hangup(session)
 
     async def on_call_failed(self, session: Session, reason: str) -> None:
         operator_failed = session.operator_leg and session.operator_leg.state == LegState.FAILED
         if operator_failed:
+            # Try another agent if available
+            retried = await self._retry_operator_mobile(session, reason)
+            if retried:
+                return
             await self._stop_onhold_playbacks(session)
-            # If user said yes but operator failed, mark disconnected; otherwise hangup.
             async with session.lock:
                 yes_intent = session.metadata.get("intent_yes") == "1"
             result_value = "disconnected" if yes_intent else "hangup"
@@ -299,9 +269,11 @@ class MarketingScenario(BaseScenario):
             async with session.lock:
                 session.metadata.pop("operator_mobile", None)
                 session.metadata.pop("operator_outbound_line", None)
+                session.metadata.pop("operator_endpoint", None)
             await self._set_result(session, "disconnected", force=True, report=True)
             await self._stop_onhold_playbacks(session)
             return
+        # If user said no and hung up during goodbye, mark as hangup (not interested already recorded).
         # Map cause codes to finer statuses when nothing else is set.
         cause_result = None
         if cause:
@@ -311,6 +283,18 @@ class MarketingScenario(BaseScenario):
                 cause_result = "banned"
             elif cause in {"18", "19", "20"}:
                 cause_result = "power_off"
+            elif cause in {"34", "41", "42"}:
+                cause_result = "banned"
+        elif cause is None:
+            # Detect self-cancelled initial INVITE (Request Terminated) via cause_txt.
+            cause_txt = session.metadata.get("hangup_cause_txt", "") if session.metadata else ""
+            if cause_txt and "Request Terminated" in cause_txt:
+                cause_result = "missed"
+        if cause_result and (session.result is None or session.result in {"user_didnt_answer", "missed", "hangup", "disconnected"}):
+            await self._set_result(session, cause_result, force=True, report=True)
+            await self._stop_onhold_playbacks(session)
+            await self._hangup(session)
+            return
         if session.result is None or session.result in {"user_didnt_answer", "missed"}:
             if yes_intent:
                 await self._set_result(session, "disconnected", force=True, report=True)
@@ -320,10 +304,6 @@ class MarketingScenario(BaseScenario):
                 await self._set_result(session, "hangup", force=True, report=True)
             else:
                 await self._set_result(session, session.result or "failed:hangup", force=True, report=True)
-        if cause_result and (session.result is None or session.result in {"user_didnt_answer", "missed", "hangup", "disconnected"}):
-            await self._set_result(session, cause_result, force=True, report=True)
-            await self._stop_onhold_playbacks(session)
-            return
         logger.debug("Call hangup signaled for session %s", session.session_id)
         await self._stop_onhold_playbacks(session)
 
@@ -406,6 +386,10 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             if session.metadata.get("hungup") == "1":
                 return
+            # track unknown attempts per phase
+            unknown_key = f"unknown_{phase}_count"
+            if unknown_key not in session.metadata:
+                session.metadata[unknown_key] = "0"
         try:
             if session.bridge and session.bridge.bridge_id:
                 await self.ari_client.record_bridge(
@@ -434,7 +418,12 @@ class MarketingScenario(BaseScenario):
             if recording_name in session.processed_recordings:
                 return
             session.processed_recordings.add(recording_name)
+            alo_key = f"alo_played_{phase}"
+            alo_needed = session.metadata.get(alo_key) != "1"
+            session.metadata[alo_key] = "1"
         on_yes, on_no = self._callbacks_for_phase(phase)
+        if alo_needed:
+            await self._play_prompt(session, "alo")
         asyncio.create_task(
             self._transcribe_response(session, recording_name, phase, on_yes, on_no)
         )
@@ -535,34 +524,21 @@ class MarketingScenario(BaseScenario):
             "سایت دارین", "نمونه تدریس", "آدرس کجاست", "ترمیکه", "اساتید کین",
             "طول دوره چقدره", "چه کتابی تدریس میشه", "من از پایه می‌خوام شروع کنم",
             "هزینه اش چقدره", "زیر نظر چه سازمانی هستید", "مدرک میدید", "از چه سطحی شروع میشه",
-            "مدرک معتبره", "من می‌خوام مهاجرت کنم", "حالا شما یه توضیح بدید",
-            "وصل کنید", "دوره ایلتس", "دوره مکالمه", "دوره دکترا",
-            "ترکی", "فرانسه", "آلمانی", "روسی",
-            "چینی", "کره ای", "عربی", "کجا برگزار میشه", "آموزشگاه کجاس", "چند وقته هست",
+            "مدرک معتبره", "من می‌خوام مهاجرت کنم", "حالا شما یه توضیح بدید","وصل کنید",
+            "دوره پنجم", "سطح پنجم",
+            "کجا برگزار میشه", "آموزشگاه کجاس", "چند وقته هست",
             "چطوری برگزار میشه", "تو چه اپلیکیشنی هست", "آنلاینه", "افلاینه", "اسم آموزشگاهتون",
-            "سایت هم دارید", "نمونه فیلم آموزشی دارید",
-            "می شه سایتتون رو برا من بفرستید ببینم لطفا",
-            "عربی به چه لهجه ای",
-            "برای دوره های زبان انگلیسی به چه شکله بله",
-            "ممنونم از بله",
-            "دوره های آلمان تون به چه صورت هست",
-            "کلاس حضوری ندارید",
-            "فرمودید سایت آموزشی",
-            "آدرستون کجاست",
-            "آموزشگاه کجاست", "میشه برام بفرستید",
-            "آدرس دارید یا فقط غیرحضوریه",
+            "سایت هم دارید", "نمونه فیلم آموزشی دارید","می شه سایتتون رو برا من بفرستید ببینم لطفا",
+            "ممنونم از بله","کلاس حضوری ندارید","فرمودید سایت آموزشی","آدرستون کجاست",
+            "آموزشگاه کجاست", "میشه برام بفرستید","آدرس دارید یا فقط غیرحضوریه",
             "می‌خواهد لینک/اطلاعات را بعدا ببیند (درخواست ارسال لینک/اطلاع)",
-            "می‌پرسد درباره دوره‌های آلمانی یا فرانسه/زبان‌ها",
-            "سوال می‌پرسد آموزشگاه کجاست یا کدام آموزشگاه هستید",
-            "درخواست راهنمایی یا توضیح بیشتر درباره دوره",
-            "سوال محل برگزاری برای حضور (کجا هستید برای حضور)",
-            "تماس برگشتی برای اطلاع از کلاس‌ها بعد از میس‌کال",
+            "سوال می‌پرسد آموزشگاه کجاست یا کدام آموزشگاه هستید","درخواست راهنمایی یا توضیح بیشتر درباره دوره",
+            "سوال محل برگزاری برای حضور (کجا هستید برای حضور)","تماس برگشتی برای اطلاع از کلاس‌ها بعد از میس‌کال",
         }
         no_tokens = {
-            "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "دو ساعت دیگه زنگ بزن", "وقت ندارم",
-            "خصوصی دارید", "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
-            "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
-            "برای کسی دیگه می‌خوام", "بفرستید کسی دیگه خواست شماره تون رو میدم",
+            "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "وقت ندارم",
+            "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
+            "خودم مدرسم", "شماره مو حذف کنید", 
         }
         # Fast-path: if transcript already contains a clear yes token, skip LLM.
         for token in ("بله", "آره"):
@@ -581,7 +557,8 @@ class MarketingScenario(BaseScenario):
             ]
             prompt = (
                 "Classify intent into one word: yes / no / number_question / unknown.\n"
-                "YES = interest or any question about price/place/time/links/who/where/how, any language mentioned, requests for info.\n"
+                "YES = interest or any question about price/place/time/links/who/where/how, requests for info or anything.\n"
+                "If the user names a course/level, treat it as YES (they want a course).\n"
                 "Examples YES: " + "; ".join(positive_examples) + ".\n"
                 "NO = reject/decline/not interested. Examples NO: " + "; ".join(negative_examples) + ".\n"
                 "NUMBER_QUESTION = asks where we got their number. Examples: " + "; ".join(number_q_examples) + ".\n"
@@ -703,9 +680,13 @@ class MarketingScenario(BaseScenario):
         )
         if "intent_unknown" in reason or reason == "unknown":
             await self._set_result(session, "unknown", force=True, report=True)
-        elif reason == "empty_transcript":
+            await self._play_prompt(session, "goodby")
+            return
+        if reason == "empty_transcript":
             await self._set_result(session, "hangup", force=True, report=True)
-        elif "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
+            await self._play_prompt(session, "goodby")
+            return
+        if "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
             await self._set_result(session, f"failed:{reason}", force=True, report=True)
         else:
             await self._set_result(session, "missed", force=False, report=True)
@@ -728,6 +709,7 @@ class MarketingScenario(BaseScenario):
                 logger.debug("Inbound-only session %s; skipping operator connect", session.session_id)
                 return
             session.metadata["operator_call_started"] = "1"
+            session.metadata.pop("operator_tried", None)
         customer_channel = self._customer_channel_id(session)
         if not customer_channel:
             logger.warning("Cannot connect to operator; no customer channel for session %s", session.session_id)
@@ -759,9 +741,10 @@ class MarketingScenario(BaseScenario):
                 session.metadata["operator_mobile"] = operator_mobile
                 session.metadata["operator_outbound_line"] = outbound_line
                 session.metadata["operator_agent_id"] = self.agent_ids.get(operator_mobile)
-            caller_id = session.metadata.get("contact_number") or (
-                self.dialer._caller_id_for_line(outbound_line) if (operator_mobile and outbound_line and self.dialer) else self.settings.operator.caller_id
-            )
+            if operator_mobile and outbound_line and self.dialer:
+                caller_id = self.dialer._caller_id_for_line(outbound_line)
+            else:
+                caller_id = self.settings.operator.caller_id
             if session.metadata.get("hungup") == "1":
                 logger.debug("Skip operator connect; session %s already hung up", session.session_id)
                 return
@@ -785,6 +768,55 @@ class MarketingScenario(BaseScenario):
             if outbound_line:
                 await self._release_outbound_line(outbound_line)
             await self._play_prompt(session, "goodby")
+
+    async def _retry_operator_mobile(self, session: Session, reason: str) -> bool:
+        """Attempt another agent mobile on failure. Returns True if retried."""
+        async with session.lock:
+            tried = set((session.metadata.get("operator_tried") or "").split(",")) if session.metadata.get("operator_tried") else set()
+            current_mobile = session.metadata.get("operator_mobile")
+            outbound_line = session.metadata.get("operator_outbound_line")
+        if current_mobile:
+            self.agent_busy.discard(current_mobile)
+            tried.add(current_mobile)
+        if outbound_line:
+            await self._release_outbound_line(outbound_line)
+        next_mobile = self._next_available_agent()
+        while next_mobile and next_mobile in tried:
+            next_mobile = self._next_available_agent()
+        if not next_mobile:
+            logger.warning("Operator retry: no available agents for session %s (reason=%s)", session.session_id, reason)
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._hangup(session)
+            return False
+        outbound_line = await self._reserve_outbound_line()
+        if not outbound_line:
+            logger.warning("Operator retry: no outbound line for session %s", session.session_id)
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._hangup(session)
+            return False
+        endpoint = f"PJSIP/{next_mobile}@{self.settings.dialer.outbound_trunk}"
+        app_args = f"operator,{session.session_id},{endpoint}"
+        caller_id = self.dialer._caller_id_for_line(outbound_line) if self.dialer else self.settings.operator.caller_id
+        async with session.lock:
+            session.metadata["operator_mobile"] = next_mobile
+            session.metadata["operator_outbound_line"] = outbound_line
+            session.metadata["operator_endpoint"] = endpoint
+            session.metadata["operator_tried"] = ",".join(tried | {next_mobile})
+            session.metadata["operator_agent_id"] = self.agent_ids.get(next_mobile)
+        logger.info("Retrying operator for session %s via %s (reason=%s)", session.session_id, endpoint, reason)
+        try:
+            await self.ari_client.originate_call(
+                endpoint=endpoint,
+                app_args=app_args,
+                caller_id=caller_id,
+                timeout=self.settings.operator.timeout,
+            )
+            self.agent_busy.add(next_mobile)
+            return True
+        except Exception as exc:
+            logger.exception("Operator retry failed for session %s: %s", session.session_id, exc)
+            await self._release_outbound_line(outbound_line)
+            return False
 
     async def _play_processing(self, session: Session) -> None:
         """
@@ -926,6 +958,7 @@ class MarketingScenario(BaseScenario):
         result = session.result or "unknown"
         status = "FAILED"
         reason = result
+        # include latest transcript for selected statuses
         user_message = None
         if session.responses:
             user_message = session.responses[-1].get("text")
