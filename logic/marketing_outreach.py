@@ -283,9 +283,17 @@ class MarketingScenario(BaseScenario):
                 cause_result = "banned"
             elif cause in {"18", "19", "20"}:
                 cause_result = "power_off"
+            elif cause in {"34", "41", "42"}:
+                cause_result = "banned"
+        elif cause is None:
+            # Detect self-cancelled initial INVITE (Request Terminated) via cause_txt.
+            cause_txt = session.metadata.get("hangup_cause_txt", "") if session.metadata else ""
+            if cause_txt and "Request Terminated" in cause_txt:
+                cause_result = "missed"
         if cause_result and (session.result is None or session.result in {"user_didnt_answer", "missed", "hangup", "disconnected"}):
             await self._set_result(session, cause_result, force=True, report=True)
             await self._stop_onhold_playbacks(session)
+            await self._hangup(session)
             return
         if session.result is None or session.result in {"user_didnt_answer", "missed"}:
             if yes_intent:
