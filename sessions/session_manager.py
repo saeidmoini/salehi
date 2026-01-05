@@ -125,7 +125,7 @@ class SessionManager:
             await self._handle_stasis_end(event)
         elif event_type == "Dial":
             # Visibility into pre-Stasis dial failures (cause/dialstatus may appear here).
-            logger.debug("Dial event: %s", event)
+            logger.info("Dial event: %s", event)
         else:
             logger.debug("Unhandled event type: %s", event_type)
 
@@ -265,7 +265,7 @@ class SessionManager:
         channel_state = channel.get("state")
         session = await self._get_session_by_channel(channel_id)
         if not session:
-            logger.debug("Channel state change for unknown channel %s", channel_id)
+            logger.info("Channel state change for unknown channel %s payload=%s", channel_id, event)
             return
 
         leg = self._find_leg(session, channel_id)
