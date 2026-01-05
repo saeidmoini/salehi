@@ -12,8 +12,13 @@ cd "${APP_DIR}"
 
 # Ensure asterisk user can write audio outputs and sounds dirs (optional if already set)
 if id asterisk >/dev/null 2>&1; then
-  sudo chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
-  sudo chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+  if command -v sudo >/dev/null 2>&1; then
+    sudo chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
+    sudo chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+  else
+    chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
+    chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+  fi
 fi
 
 # Track current branch to pull the matching remote branch (per-env configs)
