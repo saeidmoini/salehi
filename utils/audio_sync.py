@@ -56,10 +56,7 @@ def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
         "8000",
         str(wav_path),
     ]
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as exc:
-        logger.warning("ffmpeg conversion failed for %s: %s", mp3_path, exc)
+    _run_ffmpeg(cmd, "wav", mp3_path)
 
 
 def _convert_mp3_to_ulaw(mp3_path: Path, ulaw_path: Path) -> None:
@@ -77,10 +74,7 @@ def _convert_mp3_to_ulaw(mp3_path: Path, ulaw_path: Path) -> None:
         "mulaw",
         str(ulaw_path),
     ]
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as exc:
-        logger.warning("ffmpeg ulaw conversion failed for %s: %s", mp3_path, exc)
+    _run_ffmpeg(cmd, "ulaw", mp3_path)
 
 
 def _convert_mp3_to_alaw(mp3_path: Path, alaw_path: Path) -> None:
@@ -98,10 +92,17 @@ def _convert_mp3_to_alaw(mp3_path: Path, alaw_path: Path) -> None:
         "alaw",
         str(alaw_path),
     ]
+    _run_ffmpeg(cmd, "alaw", mp3_path)
+
+
+def _run_ffmpeg(cmd: list[str], label: str, mp3_path: Path) -> None:
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(cmd, capture_output=True)
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="ignore").strip()
+            logger.warning("ffmpeg %s conversion failed for %s: %s", label, mp3_path, stderr)
     except Exception as exc:
-        logger.warning("ffmpeg alaw conversion failed for %s: %s", mp3_path, exc)
+        logger.warning("ffmpeg %s conversion failed for %s: %s", label, mp3_path, exc)
 
 
 def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:
