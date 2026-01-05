@@ -14,10 +14,14 @@ cd "${APP_DIR}"
 if id asterisk >/dev/null 2>&1; then
   if command -v sudo >/dev/null 2>&1; then
     sudo chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
+    sudo chmod -R 775 "${APP_DIR}/assets/audio" || true
     sudo chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+    sudo chmod -R 775 /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
   else
     chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
+    chmod -R 775 "${APP_DIR}/assets/audio" || true
     chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+    chmod -R 775 /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
   fi
 fi
 
