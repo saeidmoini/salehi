@@ -346,6 +346,19 @@ class SessionManager:
                 f"{t_answer_to_hang:.3f}" if t_answer_to_hang is not None else "na",
                 f"{t_yes_to_hang:.3f}" if t_yes_to_hang is not None else "na",
             )
+        # If we have a clear failure cause (busy/congest/power-off/banned), notify scenario before hangup finish.
+        busy_like = {"17", "18", "19", "20", "21", "34", "41", "42"}
+        if self.scenario_handler and (
+            (cause and (str(cause) in busy_like or cause in {17, 18, 19, 20, 21, 34, 41, 42}))
+            or (cause_txt and any(x in cause_txt.lower() for x in ["busy", "congest"]))
+        ):
+            try:
+                await self.scenario_handler.on_call_failed(
+                    session, reason=(cause_txt or (str(cause) if cause is not None else None))
+                )
+            except Exception as exc:  # best-effort; don't block cleanup
+                logger.debug("on_call_failed during hangup failed for %s: %s", session.session_id, exc)
+
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)
