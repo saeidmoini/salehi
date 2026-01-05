@@ -974,6 +974,9 @@ class MarketingScenario(BaseScenario):
         if result == "connected_to_operator":
             status = "CONNECTED"
             reason = "User said yes and connected to operator"
+        elif result == "connected":
+            status = "CONNECTED"
+            reason = "User pressed 1"
         elif result == "not_interested":
             status = "NOT_INTERESTED"
             reason = "User declined"
