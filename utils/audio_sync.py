@@ -10,13 +10,17 @@ from config.settings import AudioSettings
 logger = logging.getLogger(__name__)
 
 
-def ensure_audio_assets(settings: AudioSettings) -> None:
+def ensure_audio_assets(settings: AudioSettings, audio_src_dir: str = None) -> None:
     """
     Convert any mp3 files under src_dir to 16k mono WAV under wav_dir
     and copy wav files into the Asterisk sounds directory (and language
     subdir if present).
+
+    Args:
+        settings: Audio settings (wav_dir, ast_sound_dir)
+        audio_src_dir: Scenario-specific audio source directory (overrides settings.src_dir)
     """
-    src_dir = Path(settings.src_dir)
+    src_dir = Path(audio_src_dir) if audio_src_dir else Path(settings.src_dir)
     wav_dir = Path(settings.wav_dir)
     ast_dir = Path(settings.ast_sound_dir)
 

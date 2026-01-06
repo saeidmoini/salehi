@@ -131,6 +131,7 @@ class ScenarioSettings:
     """
     name: str  # "salehi" or "agrad"
     transfer_to_operator: bool  # Whether to transfer YES intents to operator
+    audio_src_dir: str  # Scenario-specific audio source directory
 
 
 @dataclass
@@ -256,6 +257,7 @@ def get_settings() -> Settings:
     scenario = ScenarioSettings(
         name=scenario_name,
         transfer_to_operator=(scenario_name == "agrad"),
+        audio_src_dir=f"assets/audio/{scenario_name}/src",
     )
 
     log_level = os.getenv("LOG_LEVEL", "INFO")

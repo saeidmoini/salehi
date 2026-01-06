@@ -251,8 +251,13 @@ class MarketingScenario(BaseScenario):
             await self._set_result(session, result_value, force=True, report=True)
             await self._hangup(session)
             return
-        # Customer leg failed/busy/unanswered => missed
+        # Customer leg failed/busy/unanswered => classify based on reason
+        reason_l = reason.lower() if reason else ""
         result_value = "missed"
+        if "busy" in reason_l:
+            result_value = "busy"
+        elif "congest" in reason_l or "failed" in reason_l:
+            result_value = "banned"
         await self._set_result(session, result_value, force=True, report=True)
         logger.warning("Call failed session=%s reason=%s", session.session_id, reason)
         await self._hangup(session)

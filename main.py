@@ -65,7 +65,8 @@ async def async_main() -> None:
     logger = logging.getLogger("app")
 
     # Ensure audio assets are converted and available to Asterisk without blocking the loop.
-    await asyncio.to_thread(ensure_audio_assets, settings.audio)
+    # Use scenario-specific audio source directory
+    await asyncio.to_thread(ensure_audio_assets, settings.audio, settings.scenario.audio_src_dir)
 
     stt_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_stt)
     tts_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_tts)

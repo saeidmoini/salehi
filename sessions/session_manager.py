@@ -108,6 +108,8 @@ class SessionManager:
         elif event_type == "ChannelStateChange":
             await self._handle_channel_state_change(event)
         elif event_type == "ChannelHangupRequest":
+            if not (event.get("channel") or {}).get("id") in self.channel_to_session:
+                logger.debug("HangupRequest before session map: %s", event)
             await self._handle_hangup(event)
         elif event_type == "ChannelDestroyed":
             await self._handle_channel_destroyed(event)
@@ -121,6 +123,9 @@ class SessionManager:
             await self._handle_recording_failed(event)
         elif event_type == "StasisEnd":
             await self._handle_stasis_end(event)
+        elif event_type == "Dial":
+            # Visibility into pre-Stasis dial failures (cause/dialstatus may appear here).
+            logger.info("Dial event: %s", event)
         else:
             logger.debug("Unhandled event type: %s", event_type)
 
@@ -260,7 +265,7 @@ class SessionManager:
         channel_state = channel.get("state")
         session = await self._get_session_by_channel(channel_id)
         if not session:
-            logger.debug("Channel state change for unknown channel %s", channel_id)
+            logger.info("Channel state change for unknown channel %s payload=%s", channel_id, event)
             return
 
         leg = self._find_leg(session, channel_id)
@@ -284,6 +289,20 @@ class SessionManager:
             await self.scenario_handler.on_call_answered(session, leg)
         elif channel_state in {"Busy", "Failed"} and self.scenario_handler:
             await self.scenario_handler.on_call_failed(session, reason=channel_state)
+        else:
+            # Detect early busy/congestion signals so we don't wait for timeout.
+            # PJSIP may send Progress (183) with Reason cause=17/34/41/42 or text.
+            cause_raw = event.get("cause") or channel.get("cause")
+            cause = str(cause_raw) if cause_raw is not None else None
+            cause_txt = event.get("cause_txt") or channel.get("cause_txt")
+            busy_like = {"17", "18", "19", "20", "21", "34", "41", "42"}
+            if (
+                (cause in busy_like)
+                or (cause_raw in {17, 18, 19, 20, 21, 34, 41, 42})
+                or (cause_txt and any(x in cause_txt.lower() for x in ["busy", "congest"]))
+            ):
+                if self.scenario_handler:
+                    await self.scenario_handler.on_call_failed(session, reason=cause_txt or cause)
 
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
@@ -332,6 +351,19 @@ class SessionManager:
                 f"{t_answer_to_hang:.3f}" if t_answer_to_hang is not None else "na",
                 f"{t_yes_to_hang:.3f}" if t_yes_to_hang is not None else "na",
             )
+        # If we have a clear failure cause (busy/congest/power-off/banned), notify scenario before hangup finish.
+        busy_like = {"17", "18", "19", "20", "21", "34", "41", "42"}
+        if self.scenario_handler and (
+            (cause and (str(cause) in busy_like or cause in {17, 18, 19, 20, 21, 34, 41, 42}))
+            or (cause_txt and any(x in cause_txt.lower() for x in ["busy", "congest"]))
+        ):
+            try:
+                await self.scenario_handler.on_call_failed(
+                    session, reason=(cause_txt or (str(cause) if cause is not None else None))
+                )
+            except Exception as exc:  # best-effort; don't block cleanup
+                logger.debug("on_call_failed during hangup failed for %s: %s", session.session_id, exc)
+
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)
@@ -381,6 +413,12 @@ class SessionManager:
             await self._cleanup_session(session)
 
     async def _cleanup_session(self, session: Session) -> None:
+        # Prevent duplicate cleanup
+        async with session.lock:
+            if session.metadata.get("cleanup_done") == "1":
+                return
+            session.metadata["cleanup_done"] = "1"
+
         report = False
         if self.scenario_handler:
             async with session.lock:
