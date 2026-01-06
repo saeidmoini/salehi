@@ -671,7 +671,15 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             session.metadata["intent_yes"] = "1"
             session.metadata["yes_at"] = str(time.time())
+        # Salehi branch: do not connect to operator. Just acknowledge and end the call.
         await self._play_prompt(session, "yes")
+        await self._set_result(session, "disconnected", force=True, report=True)
+        channel_id = self._customer_channel_id(session)
+        if channel_id:
+            try:
+                await self.ari_client.hangup_channel(channel_id)
+            except Exception as exc:
+                logger.debug("Hangup after yes failed for session %s: %s", session.session_id, exc)
 
     async def _handle_no(self, session: Session) -> None:
         async with session.lock:
