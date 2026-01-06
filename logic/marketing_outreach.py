@@ -83,6 +83,13 @@ class MarketingScenario(BaseScenario):
         self.positive_logger = self._build_positive_logger()
         self.unknown_logger = self._build_unknown_logger()
 
+        # Log scenario configuration
+        logger.info(
+            "MarketingScenario initialized with scenario=%s (transfer_to_operator=%s)",
+            settings.scenario.name,
+            settings.scenario.transfer_to_operator,
+        )
+
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
 
@@ -196,10 +203,17 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
-            await self._play_onhold(session)
-            # Small delay so "yes" finishes cleanly before ringing operator
-            await asyncio.sleep(0.5)
-            await self._connect_to_operator(session)
+            # Scenario-specific behavior: transfer to operator or disconnect
+            if self.settings.scenario.transfer_to_operator:
+                # Agrad scenario: connect to operator
+                await self._play_onhold(session)
+                # Small delay so "yes" finishes cleanly before ringing operator
+                await asyncio.sleep(0.5)
+                await self._connect_to_operator(session)
+            else:
+                # Salehi scenario: just disconnect after "yes" prompt
+                await self._set_result(session, "disconnected", force=True, report=True)
+                await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
                 session,
