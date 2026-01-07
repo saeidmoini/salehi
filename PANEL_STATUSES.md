@@ -15,12 +15,12 @@ The system maps internal result values to standardized panel statuses. This docu
 
 | Internal Result | Panel Status | When It Occurs | Includes Transcript | Scenario Difference |
 |-----------------|--------------|----------------|---------------------|---------------------|
-| `connected_to_operator` | **CONNECTED** | User said YES and operator answered | ✅ Yes | **Agrad only** - Salehi disconnects after YES |
+| `connected_to_operator` | **CONNECTED** | User said YES | ✅ Yes | **Both scenarios** - Salehi: no transfer, Agrad: with operator |
 | `not_interested` | **NOT_INTERESTED** | User said NO / declined offer | ✅ Yes | Both scenarios |
 | `missed` | **MISSED** | No answer / timeout / unreachable | ❌ No | Both scenarios |
 | `user_didnt_answer` | **MISSED** | Dialer timeout (no events received) | ❌ No | Both scenarios |
 | `hangup` | **HANGUP** | User hung up during call | ❌ No | Both scenarios |
-| `disconnected` | **DISCONNECTED** | User said YES but call ended | ✅ Yes | **Different meaning per scenario** |
+| `disconnected` | **DISCONNECTED** | Operator transfer failed (Agrad only) | ✅ Yes | **Agrad only** - Salehi uses connected_to_operator |
 | `unknown` | **UNKNOWN** | Unclear intent / LLM couldn't classify | ✅ Yes | Both scenarios |
 | `failed:stt_failure` | **NOT_INTERESTED** | STT couldn't transcribe (treated as no response) | ❌ No | Both scenarios |
 | `failed:*` | **FAILED** | Technical failure (recording, LLM, etc.) | ❌ No | Both scenarios |
@@ -32,28 +32,47 @@ The system maps internal result values to standardized panel statuses. This docu
 
 ## Detailed Status Descriptions
 
-### 1. CONNECTED (Agrad Only)
+### 1. CONNECTED (Both Scenarios)
 
 **Internal Result**: `connected_to_operator`
 **Panel Status**: `CONNECTED`
-**Reason**: "User said yes and connected to operator"
+**Reason**: Scenario-dependent
 **Transcript**: ✅ Included (user's response)
 
 **When It Occurs**:
+
+#### Salehi Scenario:
+- User says YES (intent classified as "yes")
+- "yes" prompt plays successfully
+- Result set to `connected_to_operator`
+- Call disconnects immediately (no operator transfer)
+- **This is the success outcome for Salehi**
+
+**Code Location**: [logic/marketing_outreach.py:257](logic/marketing_outreach.py#L257)
+
+**Call Flow (Salehi)**:
+```
+hello → record → alo → classify
+  └─ YES intent
+      └─ play "yes"
+          └─ set result: "connected_to_operator"
+              └─ disconnect
+                  └─ Panel: "CONNECTED" ✅ (Success!)
+```
+
+#### Agrad Scenario:
 - User says YES (intent classified as "yes")
 - "yes" prompt plays successfully
 - "onhold" prompt plays successfully
 - Operator leg is originated
 - Operator answers the call
 - Call is bridged successfully
+- Result set to `connected_to_operator`
+- **This is the success outcome for Agrad**
 
-**Code Location**: [logic/marketing_outreach.py:180](logic/marketing_outreach.py#L180)
+**Code Location**: [logic/marketing_outreach.py:222](logic/marketing_outreach.py#L222)
 
-**Scenario Difference**:
-- **Salehi**: NEVER occurs (disconnects after YES instead of transferring)
-- **Agrad**: Primary success outcome
-
-**Call Flow** (Agrad):
+**Call Flow (Agrad)**:
 ```
 hello → record → alo → classify
   └─ YES intent
@@ -63,7 +82,12 @@ hello → record → alo → classify
                   └─ operator answers
                       └─ bridge call
                           └─ result: "connected_to_operator"
+                              └─ Panel: "CONNECTED" ✅ (Success!)
 ```
+
+**Scenario Difference**:
+- **Salehi**: Result set immediately after YES, no operator transfer
+- **Agrad**: Result set after operator answers, with full bridge
 
 ---
 
@@ -160,46 +184,23 @@ hello → (customer hangs up)
 
 ---
 
-### 5. DISCONNECTED / CONNECTED (Salehi)
+### 5. DISCONNECTED (Agrad Only)
 
 **Internal Result**: `disconnected`
-**Panel Status**: **CONNECTED** (Salehi) or **DISCONNECTED** (Agrad)
-**Reason**: Scenario-dependent
+**Panel Status**: **DISCONNECTED**
+**Reason**: "Caller said yes but disconnected before operator answered"
 **Transcript**: ✅ Included (user's response)
 
-**When It Occurs**:
-
-#### Salehi Scenario:
-- User says YES (intent classified as "yes")
-- "yes" prompt plays successfully
-- Call is INTENTIONALLY disconnected (no operator transfer)
-- **Panel receives: status=CONNECTED** (this is the success outcome)
-- Reason: "User said yes (no operator transfer in this scenario)"
-
-**Code Location**: [logic/marketing_outreach.py:215](logic/marketing_outreach.py#L215)
-
-**Call Flow (Salehi)**:
-```
-hello → record → alo → classify
-  └─ YES intent
-      └─ play "yes"
-          └─ DISCONNECT
-              └─ result: "disconnected"
-                  └─ Panel: "CONNECTED" ✅ (Success!)
-```
-
-#### Agrad Scenario:
+**When It Occurs** (Agrad only):
 - User says YES (intent classified as "yes")
 - "yes" prompt plays successfully
 - "onhold" prompt plays successfully
 - Operator leg origination FAILS (no operators available, timeout, etc.)
 - OR customer hangs up while waiting for operator
-- **Panel receives: status=DISCONNECTED** (this is a failure)
-- Reason: "Caller said yes but disconnected before operator answered"
+- **This is a FAILURE outcome for Agrad**
 
 **Code Locations**:
-- [logic/marketing_outreach.py:841](logic/marketing_outreach.py#L841) - Operator failed to connect
-- [logic/marketing_outreach.py:847](logic/marketing_outreach.py#L847) - Customer hung up during operator transfer
+- [logic/marketing_outreach.py:297](logic/marketing_outreach.py#L297) - on_call_failed with YES intent
 
 **Call Flow (Agrad)**:
 ```
@@ -213,9 +214,9 @@ hello → record → alo → classify
                           └─ Panel: "DISCONNECTED" ❌ (Failure)
 ```
 
-**Scenario Difference**: 🔴 **CRITICAL DIFFERENCE**
-- **Salehi**: `disconnected` → Panel: **CONNECTED** = **SUCCESS** (expected outcome, no operator transfer)
-- **Agrad**: `disconnected` → Panel: **DISCONNECTED** = **FAILURE** (operator transfer failed)
+**Scenario Difference**:
+- **Salehi**: Does NOT use `disconnected` result (uses `connected_to_operator` instead)
+- **Agrad**: Uses `disconnected` only when operator transfer fails after user says YES
 
 ---
 
@@ -419,14 +420,14 @@ hello → record → STT success → LLM quota exceeded
 **Call Flow**:
 ```
 hello → record → alo → classify:
-  ├─ YES → yes → DISCONNECT (result: "disconnected")
+  ├─ YES → yes → set result: "connected_to_operator" → disconnect
   ├─ NO → goodby → hangup (result: "not_interested")
   ├─ NUMBER_QUESTION → number → record again → classify (loop)
   └─ UNKNOWN → goodby → hangup (result: "unknown")
 ```
 
 **Possible Results**:
-- ✅ **disconnected** → Panel: **CONNECTED** - Success! User said yes
+- ✅ **connected_to_operator** → Panel: **CONNECTED** - Success! User said yes
 - ❌ not_interested - User declined
 - ❌ unknown - Unclear response
 - ❌ hangup - User hung up
@@ -434,7 +435,7 @@ hello → record → alo → classify:
 - ❌ busy/power_off/banned - SIP failures
 - ❌ failed:* - Technical failures (vira_quota, llm_quota, recording, etc.)
 
-**Key Point**: `disconnected` internal result → Panel status **CONNECTED** = **success outcome** in Salehi (no operator transfer)
+**Key Point**: `connected_to_operator` internal result → Panel status **CONNECTED** = **success outcome** in Salehi (no operator transfer, immediate disconnect)
 
 ---
 
