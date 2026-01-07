@@ -449,17 +449,27 @@ class SessionManager:
         peer_id = peer.get("id")
         peer_protocol_id = peer.get("protocol_id")
         dialstatus = event.get("dialstatus", "")
+        dialstring = event.get("dialstring", "")
 
-        # Find session_id from protocol_id_to_session map (registered during originate)
+        # Find session_id by matching phone number from dialstring
+        # dialstring format: "09123456789@trunk"
         session_id = None
-        async with self.lock:
-            # Check all protocol_id mappings to find our session
-            for protocol_id, sid in self.protocol_id_to_session.items():
-                session_id = sid
-                break  # Use first/latest
+        phone_number = None
+        if dialstring and "@" in dialstring:
+            phone_number = dialstring.split("@")[0]
+
+            # Search through active sessions for matching contact_number
+            async with self.lock:
+                for sid, session in self.sessions.items():
+                    contact_num = session.metadata.get("contact_number", "")
+                    # Match phone number (handle potential formatting differences)
+                    if contact_num and phone_number in contact_num:
+                        session_id = sid
+                        break
 
         if not session_id:
-            logger.debug("Dial event without known session: %s", event)
+            logger.debug("Dial event without matching session: dialstring=%s phone=%s",
+                        dialstring, phone_number)
             return
 
         # Also register the peer channel's protocol_id and id for hangup tracking
