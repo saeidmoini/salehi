@@ -45,8 +45,8 @@ if id asterisk >/dev/null 2>&1; then
   done
 fi
 
-python3 -m venv "${APP_DIR}/venv" || true
-source "${APP_DIR}/venv/bin/activate"
+python3 -m venv "${APP_DIR}/.venv" || true
+source "${APP_DIR}/.venv/bin/activate"
 pip install --upgrade pip
 pip install --upgrade -r "${APP_DIR}/requirements.txt"
 
