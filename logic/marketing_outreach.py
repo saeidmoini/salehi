@@ -300,15 +300,34 @@ class MarketingScenario(BaseScenario):
             await self._set_result(session, result_value, force=True, report=True)
             await self._hangup(session)
             return
-        # Customer leg failed/busy/unanswered => classify based on reason
+        # Customer leg failed/busy/unanswered => classify based on reason and cause codes
         reason_l = reason.lower() if reason else ""
-        result_value = "missed"
-        if "busy" in reason_l:
+
+        # Check session metadata for hangup cause and dialstatus
+        hangup_cause = session.metadata.get("hangup_cause")
+        dialstatus = session.metadata.get("dialstatus", "")
+
+        # Iran-specific: NOANSWER with cause=38 means user rejected (treat as busy)
+        # cause=38 is "Network out of order" which Iran carriers use for rejections
+        if dialstatus == "NOANSWER" and hangup_cause == "38":
             result_value = "busy"
-        elif "congest" in reason_l or "failed" in reason_l:
+            logger.info("Iran telecom reject detected: session=%s dialstatus=%s cause=%s -> busy",
+                       session.session_id, dialstatus, hangup_cause)
+        elif "busy" in reason_l or hangup_cause == "17":
+            result_value = "busy"
+        elif "congest" in reason_l or hangup_cause in {"38"}:
+            # Cause 38 without NOANSWER dialstatus is also congestion/busy
+            result_value = "busy"
+        elif "failed" in reason_l or hangup_cause in {"21", "34", "41", "42"}:
             result_value = "banned"
+        elif hangup_cause in {"18", "19", "20"}:
+            result_value = "power_off"
+        else:
+            result_value = "missed"
+
         await self._set_result(session, result_value, force=True, report=True)
-        logger.warning("Call failed session=%s reason=%s", session.session_id, reason)
+        logger.warning("Call failed session=%s reason=%s dialstatus=%s cause=%s result=%s",
+                      session.session_id, reason, dialstatus, hangup_cause, result_value)
         await self._hangup(session)
 
     async def on_call_hangup(self, session: Session) -> None:
