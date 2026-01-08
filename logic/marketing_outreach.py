@@ -307,21 +307,34 @@ class MarketingScenario(BaseScenario):
         hangup_cause = session.metadata.get("hangup_cause")
         dialstatus = session.metadata.get("dialstatus", "")
 
+        # Classify based on SIP cause codes
+        # Cause 16, 31, 32: Normal call clearing (customer answered then hung up)
+        if hangup_cause in {"16", "31", "32"}:
+            result_value = "hangup"
+        # Cause 17: User busy (real busy signal)
+        elif hangup_cause == "17":
+            result_value = "busy"
         # Iran-specific: NOANSWER with cause=38 means user rejected (treat as busy)
         # cause=38 is "Network out of order" which Iran carriers use for rejections
-        if dialstatus == "NOANSWER" and hangup_cause == "38":
+        elif dialstatus == "NOANSWER" and hangup_cause == "38":
             result_value = "busy"
             logger.info("Iran telecom reject detected: session=%s dialstatus=%s cause=%s -> busy",
                        session.session_id, dialstatus, hangup_cause)
-        elif "busy" in reason_l or hangup_cause == "17":
+        # Cause 38 without NOANSWER dialstatus is also congestion/busy
+        elif hangup_cause == "38":
             result_value = "busy"
-        elif "congest" in reason_l or hangup_cause in {"38"}:
-            # Cause 38 without NOANSWER dialstatus is also congestion/busy
-            result_value = "busy"
-        elif "failed" in reason_l or hangup_cause in {"21", "34", "41", "42"}:
-            result_value = "banned"
-        elif hangup_cause in {"18", "19", "20"}:
+        # Cause 18, 19, 20: Phone off/no response
+        # Cause 3, 22, 27: No route/number changed/destination out of order
+        elif hangup_cause in {"18", "19", "20", "3", "22", "27"}:
             result_value = "power_off"
+        # Cause 21, 34, 41, 42: Rejected/blocked by operator
+        elif hangup_cause in {"21", "34", "41", "42"}:
+            result_value = "banned"
+        # Fallback to text-based detection
+        elif "busy" in reason_l:
+            result_value = "busy"
+        elif "congest" in reason_l or "failed" in reason_l:
+            result_value = "banned"
         else:
             result_value = "missed"
 
