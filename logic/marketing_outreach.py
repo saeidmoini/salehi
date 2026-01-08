@@ -304,53 +304,36 @@ class MarketingScenario(BaseScenario):
         reason_l = reason.lower() if reason else ""
 
         # Check session metadata for hangup cause and dialstatus
-        # Prefer early_cause (from SIP 183) over hangup_cause (final, often overwritten)
-        early_cause = session.metadata.get("early_cause")
+        # NOTE: Cannot capture early causes - ARI doesn't expose SIP Reason headers from 183 messages
         hangup_cause = session.metadata.get("hangup_cause")
-        actual_cause = early_cause or hangup_cause
         dialstatus = session.metadata.get("dialstatus", "")
 
         # Classify based on SIP cause codes
         # Cause 16, 31, 32: Normal call clearing (customer answered then hung up)
-        if actual_cause in {"16", "31", "32"}:
+        if hangup_cause in {"16", "31", "32"}:
             result_value = "hangup"
-        # Cause 1: Unallocated/invalid number
-        elif actual_cause == "1":
-            result_value = "power_off"
-            logger.info("Invalid number detected: session=%s early_cause=%s -> power_off",
-                       session.session_id, early_cause)
         # Cause 17: User busy (real busy signal)
-        elif actual_cause == "17":
+        elif hangup_cause == "17":
             result_value = "busy"
-            if early_cause == "17":
-                logger.info("Real busy signal detected: session=%s early_cause=%s -> busy",
-                           session.session_id, early_cause)
         # Cause 18, 19, 20: Phone off/no response
-        elif actual_cause in {"18", "19", "20"}:
+        elif hangup_cause in {"18", "19", "20"}:
             result_value = "power_off"
-            if early_cause in {"18", "19", "20"}:
-                logger.info("Phone off detected: session=%s early_cause=%s -> power_off",
-                           session.session_id, early_cause)
-        # Cause 0: Unknown/no cause available (treat as power_off to avoid retries)
-        elif actual_cause == "0":
+        # Cause 0, 1, 3, 22, 27: Unknown/invalid/no route
+        elif hangup_cause in {"0", "1", "3", "22", "27"}:
             result_value = "power_off"
-            logger.info("Unknown cause detected: session=%s early_cause=%s -> power_off",
-                       session.session_id, early_cause)
-        # Cause 3, 22, 27: No route/number changed/destination out of order
-        elif actual_cause in {"3", "22", "27"}:
+        # Iran-specific: NOANSWER with cause=38
+        # cause=38 is "Network out of order" which Iran carriers use for ALL rejections
+        # Unfortunately we cannot distinguish between busy/power_off/invalid when cause=38
+        elif dialstatus == "NOANSWER" and hangup_cause == "38":
+            # Default to power_off since we can't tell - safer than marking as busy
             result_value = "power_off"
-        # Iran-specific: NOANSWER with cause=38 means user rejected (treat as busy)
-        # cause=38 is "Network out of order" which Iran carriers use for rejections
-        # BUT if we have an early_cause, use that instead!
-        elif dialstatus == "NOANSWER" and actual_cause == "38":
-            result_value = "busy"
-            logger.info("Iran telecom reject detected: session=%s dialstatus=%s cause=%s -> busy",
-                       session.session_id, dialstatus, actual_cause)
-        # Cause 38 without NOANSWER dialstatus is also congestion/busy
-        elif actual_cause == "38":
+            logger.info("Iran telecom cause=38 (ambiguous): session=%s dialstatus=%s -> power_off (could be busy/off/invalid)",
+                       session.session_id, dialstatus)
+        # Cause 38 without NOANSWER dialstatus is congestion/busy
+        elif hangup_cause == "38":
             result_value = "busy"
         # Cause 21, 34, 41, 42: Rejected/blocked by operator
-        elif actual_cause in {"21", "34", "41", "42"}:
+        elif hangup_cause in {"21", "34", "41", "42"}:
             result_value = "banned"
         # Fallback to text-based detection
         elif "busy" in reason_l:
@@ -361,8 +344,8 @@ class MarketingScenario(BaseScenario):
             result_value = "missed"
 
         await self._set_result(session, result_value, force=True, report=True)
-        logger.warning("Call failed session=%s reason=%s dialstatus=%s early_cause=%s final_cause=%s result=%s",
-                      session.session_id, reason, dialstatus, early_cause, hangup_cause, result_value)
+        logger.warning("Call failed session=%s reason=%s dialstatus=%s cause=%s result=%s",
+                      session.session_id, reason, dialstatus, hangup_cause, result_value)
         await self._hangup(session)
 
     async def on_call_hangup(self, session: Session) -> None:

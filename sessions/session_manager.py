@@ -480,20 +480,10 @@ class SessionManager:
             async with self.lock:
                 self.channel_to_session[peer_id] = session_id
 
-        # Capture early cause codes from PROGRESS events (SIP 183 Reason headers)
-        # These show the real reason before Asiatech overwrites with cause=38
-        if dialstatus == "PROGRESS":
-            session = await self.get_session(session_id)
-            if session:
-                cause = peer.get("cause")
-                # Capture early causes including 0 (unknown), 1, 17, 18, 19, 20, etc.
-                if cause is not None and cause in {0, 1, 17, 18, 19, 20, 3, 22, 27}:
-                    async with session.lock:
-                        # Store early cause only if we don't have one yet
-                        if not session.metadata.get("early_cause"):
-                            session.metadata["early_cause"] = str(cause)
-                            logger.info("Captured early cause=%s from PROGRESS for session=%s",
-                                       cause, session_id)
+        # NOTE: We cannot capture early cause codes from PROGRESS events because
+        # ARI does not expose the SIP Reason header (cause=1,17,20,etc) in Dial events.
+        # The cause field only appears in final failure events (NOANSWER, BUSY, etc).
+        # This is an Asterisk ARI limitation - SIP 183 Reason headers are not passed through.
 
         # Check for failure dialstatus
         if dialstatus in {"BUSY", "NOANSWER", "CONGESTION", "CHANUNAVAIL"}:
