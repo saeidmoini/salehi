@@ -253,8 +253,8 @@ class MarketingScenario(BaseScenario):
                 await asyncio.sleep(0.5)
                 await self._connect_to_operator(session)
             else:
-                # Salehi scenario: mark as connected (success), then disconnect
-                await self._set_result(session, "connected_to_operator", force=True, report=True)
+                # Salehi scenario: customer said yes, mark as disconnected and end call
+                await self._set_result(session, "disconnected", force=True, report=True)
                 await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
@@ -836,20 +836,9 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             session.metadata["intent_yes"] = "1"
             session.metadata["yes_at"] = str(time.time())
-        # Salehi branch: do not connect to operator. Just acknowledge and end the call.
+        # Play "yes" acknowledgment prompt
+        # The on_playback_finished handler will complete the call flow when done
         await self._play_prompt(session, "yes")
-        # Give the prompt a moment to play before tearing down the call.
-        try:
-            await asyncio.sleep(2)
-        except Exception:
-            pass
-        await self._set_result(session, "disconnected", force=True, report=True)
-        channel_id = self._customer_channel_id(session)
-        if channel_id:
-            try:
-                await self.ari_client.hangup_channel(channel_id)
-            except Exception as exc:
-                logger.debug("Hangup after yes failed for session %s: %s", session.session_id, exc)
 
     async def _handle_no(self, session: Session) -> None:
         async with session.lock:
