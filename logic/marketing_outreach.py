@@ -280,6 +280,12 @@ class MarketingScenario(BaseScenario):
             await self._hangup(session)
 
     async def on_call_failed(self, session: Session, reason: str) -> None:
+        # Prevent duplicate processing - if final result already set, skip
+        if session.result:
+            logger.debug("Skipping duplicate on_call_failed for session=%s (already has result=%s)",
+                        session.session_id, session.result)
+            return
+
         operator_failed = session.operator_leg and session.operator_leg.state == LegState.FAILED
         if operator_failed:
             # Try another agent if available
