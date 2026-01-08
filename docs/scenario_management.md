@@ -19,11 +19,15 @@ The Salehi CallCenter project now supports **multiple call flow scenarios** thro
 **Configuration**: `SCENARIO=salehi`
 
 **Behavior**:
-- When customer says YES: Play "yes" prompt → Disconnect
-- Result status: `disconnected`
-- **No operator transfer**
+- Flow: hello → alo → record → classify intent
+- When customer says YES: Play "yes" prompt → Mark as `connected_to_operator` → Disconnect
+- Result status: `connected_to_operator` (reported as CONNECTED to panel)
+- **No operator transfer** - disconnect is the success outcome
+- **Audio prompts**: hello, alo, goodby, yes, number (for "where did you get my number" question)
+- **STT hotwords**: Course and language-specific vocabulary (e.g., "دوره ایلتس", "دوره مکالمه", "ترکی", "فرانسه", "آلمانی")
+- **LLM examples**: Language course names and language names for better intent classification
 
-**Use Case**: Simple acknowledgment flow where you just want to confirm customer interest without immediate transfer.
+**Use Case**: Language academy marketing where you just want to confirm customer interest and report success without immediate operator transfer.
 
 ---
 
@@ -32,11 +36,15 @@ The Salehi CallCenter project now supports **multiple call flow scenarios** thro
 **Configuration**: `SCENARIO=agrad`
 
 **Behavior**:
+- Flow: hello → alo → record → classify intent
 - When customer says YES: Play "yes" prompt → Play "onhold" → Connect to operator
-- Result status: `connected_to_operator` (if operator answers) or `disconnected` (if operator unavailable)
-- **Full operator transfer**
+- Result status: `connected_to_operator` (if operator answers and reports CONNECTED to panel) or `disconnected` (if customer hangs up before operator)
+- **Full operator transfer** enabled
+- **Audio prompts**: hello, alo, goodby, yes, onhold (number prompt NOT used)
+- **STT hotwords**: General response vocabulary (e.g., "بله", "آره", "نه", "باشه")
+- **LLM examples**: General yes/no responses (no number_question intent)
 
-**Use Case**: Full-service flow where interested customers are immediately connected to a live operator.
+**Use Case**: General marketing where interested customers are immediately connected to a live operator for conversation.
 
 ---
 
@@ -54,12 +62,23 @@ SCENARIO=salehi
 
 ### How It Works
 
-The `SCENARIO` environment variable controls the `transfer_to_operator` flag in the system:
+The `SCENARIO` environment variable controls multiple aspects of the system:
 
-- `SCENARIO=salehi` → `transfer_to_operator = False`
-- `SCENARIO=agrad` → `transfer_to_operator = True`
+- `SCENARIO=salehi`:
+  - `transfer_to_operator = False`
+  - Audio files loaded from `assets/audio/salehi/src/`
+  - STT hotwords: Course/language-specific vocabulary (from commit fc47e34)
+  - LLM examples: Language course names and languages for intent classification
+  - Number question prompt enabled
 
-The marketing scenario logic ([logic/marketing_outreach.py](../logic/marketing_outreach.py)) checks this flag to determine the flow after the "yes" prompt.
+- `SCENARIO=agrad`:
+  - `transfer_to_operator = True`
+  - Audio files loaded from `assets/audio/agrad/src/`
+  - STT hotwords: General response vocabulary
+  - LLM examples: General yes/no responses
+  - Number question NOT used
+
+The marketing scenario logic ([logic/marketing_outreach.py](../logic/marketing_outreach.py:1-1200)) checks these settings to determine call flow, which prompts to play, which vocabulary to use for STT, and which examples to use for LLM classification.
 
 ---
 
@@ -90,8 +109,9 @@ OPERATOR_MOBILE_NUMBERS=09121111111,09122222222
 
 **Deployment**:
 1. Push changes to main branch
-2. On each server: `git pull && ./update.sh`
+2. On each server: `./update.sh` (auto-detects scenario from `.env`)
 3. Each server runs the scenario configured in its `.env`
+4. Services are named by scenario: `salehi.service` or `agrad.service`
 
 ---
 
@@ -104,8 +124,12 @@ If you need to switch scenarios on the same server:
 nano .env
 # Change: SCENARIO=salehi to SCENARIO=agrad
 
-# Restart service
-sudo systemctl restart salehi
+# Restart appropriate service (service name matches scenario)
+sudo systemctl restart salehi.service  # If switching from salehi
+# OR
+sudo systemctl restart agrad.service   # If switching to agrad
+
+# Note: You may need to update service file name/config when switching scenarios
 ```
 
 ---
@@ -132,17 +156,20 @@ SCENARIO=agrad python main.py
 - Bugfixes needed to be applied twice
 - Features added to one branch might not make it to the other
 - Branch divergence over time
+- Audio files had same names but different content, causing conflicts during merges
 
 **Structure**:
 ```
 git branch salehi:
-  - Marketing scenario: disconnect on YES
-  - Audio files specific to Salehi
+  - Marketing scenario: disconnect on YES (result: disconnected)
+  - Audio files: assets/audio/src/ (course-specific prompts)
+  - STT/LLM: Language course vocabulary
   - Deployment config for Salehi environment
 
 git branch agrad:
   - Marketing scenario: transfer to operator on YES
-  - Audio files specific to Agrad
+  - Audio files: assets/audio/src/ (general prompts - DIFFERENT CONTENT!)
+  - STT/LLM: General vocabulary
   - Deployment config for Agrad environment
 ```
 
@@ -151,42 +178,69 @@ git branch agrad:
 ### New Approach (Single Branch with Config)
 
 **Benefits**:
-- One branch (`main` or `salehi` or whatever you choose)
+- One branch (`main`)
 - Scenario switched via `.env` variable
 - Shared code updated once
 - Easy to test both scenarios
 - No branch divergence
+- No audio file conflicts (separate directories per scenario)
 
 **Structure**:
 ```
 git branch main:
   - Marketing scenario: checks settings.scenario.transfer_to_operator
-  - Audio files for all scenarios (assets/audio/)
-  - Config-driven deployment (.env)
+  - Audio files separated by scenario:
+    - assets/audio/salehi/src/ (course-specific prompts)
+    - assets/audio/agrad/src/ (general prompts)
+  - STT hotwords: scenario-specific in code (line 67-122)
+  - LLM examples: scenario-specific in code (line 611-673)
+  - Config-driven deployment (.env with SCENARIO variable)
+  - Service naming: Dynamic based on scenario (salehi.service or agrad.service)
 ```
 
 ---
 
 ## Migration Steps
 
-### Step 1: Merge Your Branches (One-Time)
+### Automated Migration (Recommended)
+
+**Use the migration script for production servers:**
 
 ```bash
-# Assuming you have 'salehi' and 'agrad' branches
+# From your current branch (salehi or agrad)
+bash migrate_to_main.sh
+```
 
-# 1. Checkout the branch you want to keep as main (e.g., salehi)
-git checkout salehi
+**What the script does:**
+1. Detects your current scenario from branch name or `.env`
+2. Backs up existing audio files with timestamp
+3. Removes old `assets/audio/src/` and `assets/audio/wav/` directories (prevents conflicts)
+4. Switches to `main` branch cleanly
+5. Updates `.env` with detected scenario
+6. Shows verification steps
+7. Reminds you to run `./update.sh` and restart service
 
-# 2. Pull latest changes
-git pull origin salehi
+**After migration:**
+```bash
+# Run update script to install dependencies and sync audio
+./update.sh
 
-# 3. Review differences between branches
-git diff salehi agrad
+# Restart service (script shows correct command)
+sudo systemctl restart salehi.service  # or agrad.service
+```
 
-# 4. Manually merge any scenario-specific features from agrad
-#    (Usually just different audio files or operator settings)
+---
 
-# 5. The code now supports both scenarios via SCENARIO env var
+### Manual Migration (Development/Understanding)
+
+**Step 1: Merge Your Branches (One-Time - Already Done)**
+
+```bash
+# This has been completed and main branch now exists with:
+# - Scenario-specific audio directories
+# - Scenario-based STT hotwords (from fc47e34)
+# - Scenario-based LLM examples
+# - Dynamic service naming in update.sh
 ```
 
 ### Step 2: Update Environment Files
@@ -221,15 +275,41 @@ python main.py
 ```bash
 # On each server
 ./update.sh
+
+# The script will:
+# - Auto-detect scenario from .env
+# - Pull from main branch
+# - Update dependencies
+# - Sync audio files from assets/audio/<scenario>/src/
+# - Restart correct service (salehi.service or agrad.service)
 ```
 
-### Step 5: Archive Old Branches (Optional)
+### Step 5: Verify Migration
 
 ```bash
-# Once confirmed working, you can archive the old branch
+# Check scenario loaded correctly
+tail -f logs/app.log | grep "MarketingScenario initialized"
+
+# Should see:
+# "MarketingScenario initialized with scenario=salehi (transfer_to_operator=False)"
+# OR
+# "MarketingScenario initialized with scenario=agrad (transfer_to_operator=True)"
+
+# Verify audio files
+ls -lh assets/audio/salehi/src/  # Or agrad
+ls -lh /var/lib/asterisk/sounds/custom/
+
+# Test a call and verify correct flow
+```
+
+### Step 6: Archive Old Branches (Optional)
+
+```bash
+# Once confirmed working on all servers, you can archive old branches
+git tag archive/salehi salehi
 git tag archive/agrad agrad
-git branch -d agrad
-git push origin :agrad  # Delete remote branch
+git branch -d salehi agrad
+git push origin :salehi :agrad  # Delete remote branches (if desired)
 ```
 
 ---
@@ -274,21 +354,40 @@ elif prompt_key == "yes":
         await self._connect_to_operator(session)
     else:
         # Salehi scenario
-        await self._set_result(session, "disconnected", force=True, report=True)
+        await self._set_result(session, "connected_to_operator", force=True, report=True)
         await self._hangup(session)
 ```
 
-**3. Add custom audio files**:
+**3. Add scenario-specific STT hotwords and LLM examples:**
+
+```python
+# In __init__ method
+if settings.scenario.name == "custom":
+    self.stt_hotwords = ["custom", "vocab", "words"]
+else:
+    # Existing salehi/agrad logic
+    ...
+```
+
+**4. Add custom audio files**:
 
 ```bash
-# Add assets/audio/src/custom_prompt.mp3
+# Create scenario directory
+mkdir -p assets/audio/custom/src/
+
+# Add audio files
+# assets/audio/custom/src/custom_prompt.mp3
+# assets/audio/custom/src/hello.mp3
+# ... etc
+
 # Run audio sync
 bash scripts/sync_audio.sh
 ```
 
-**4. Use the new scenario**:
+**5. Use the new scenario**:
 
 ```bash
+# In .env
 SCENARIO=custom
 ```
 
@@ -448,7 +547,13 @@ Keep a table of what differs between scenarios:
 | Operator Transfer | ❌ No | ✅ Yes |
 | "Yes" Prompt | ✅ Plays then disconnects | ✅ Plays then transfers |
 | "Onhold" Prompt | ❌ Never plays | ✅ Plays during transfer |
-| Result for YES | `disconnected` | `connected_to_operator` |
+| "Number" Prompt | ✅ Yes (for "where did you get my number") | ❌ No |
+| Result for YES | `connected_to_operator` | `connected_to_operator` |
+| Panel Status for YES | CONNECTED | CONNECTED |
+| Audio Directory | `assets/audio/salehi/src/` | `assets/audio/agrad/src/` |
+| STT Hotwords | Course/language names | General vocabulary |
+| LLM Examples | Language courses, languages | General yes/no |
+| Service Name | `salehi.service` | `agrad.service` |
 | Panel Integration | ✅ Yes | ✅ Yes |
 
 ### 5. Monitor Scenario in Production
