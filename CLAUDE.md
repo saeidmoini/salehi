@@ -269,6 +269,7 @@ class Session:
    - Auto-answers inbound calls
    - Extracts caller info from SIP headers
    - Normalizes phone numbers
+   - Directly connects inbound callers to an available agent (skips marketing flow)
 
 6. **Concurrency Control**:
    - Per-line capacity limits (shared inbound+outbound)
@@ -957,6 +958,44 @@ exten => _X.,1,Stasis(salehi)
 ---
 
 ## Recent Improvements and Bug Fixes
+
+### Inbound Direct-to-Agent Routing (2026-02-08)
+
+**Feature**: Inbound calls now skip the marketing scenario entirely and are directly connected to an available agent's mobile phone.
+
+**Behavior** (both Salehi and Agrad scenarios):
+- Inbound call arrives → auto-answered → hold music plays → system selects first available agent (round-robin) → originates call to agent's mobile → bridges customer with agent
+- No hello prompt, no recording, no STT, no LLM classification
+- Agent mobiles come from panel (`active_agents`) or `OPERATOR_MOBILE_NUMBERS` config
+- All inbound results reported as `disconnected` to panel (no other status available currently)
+
+**Edge Cases Handled**:
+- No agents available → hangup with `disconnected` result
+- No outbound line available → hangup with `disconnected` result
+- Customer hangs up during operator ring → operator leg terminated, `disconnected` reported
+- Operator doesn't answer / all retries fail → `disconnected` reported
+- Operator answers then either party hangs up → `disconnected` reported
+
+**Key Implementation**:
+- `on_inbound_channel_created()` marks session as `inbound_direct=1` and initiates operator transfer
+- `on_call_answered()` skips marketing flow for `inbound_direct` sessions
+- `on_call_finished()` forces result to `disconnected` for all inbound-direct sessions
+- Reuses existing `_connect_to_operator()` infrastructure (agent selection, line reservation, retry)
+- Removed unused `_is_inbound_only()` method
+
+**Inbound Direct Flow**:
+```
+Inbound call → StasisStart → _accept_inbound() → answer
+→ on_inbound_channel_created()
+  → Mark session as inbound_direct
+  → Play hold music
+  → _connect_to_operator()
+    → Select agent (round-robin)
+    → Reserve outbound line
+    → Originate call to agent mobile
+→ Operator answers → Stop hold music → Customer talks to agent
+→ Either party hangs up → Report "disconnected" to panel
+```
 
 ### Playback Completion Handling (2026-01-08)
 

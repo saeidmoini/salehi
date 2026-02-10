@@ -6,3 +6,4 @@ prompt.txt
 *.log
 logs/
 tmp/
+.pytest_cache/

@@ -544,9 +544,11 @@ Keep a table of what differs between scenarios:
 
 | Feature | Salehi | Agrad |
 |---------|--------|-------|
-| Operator Transfer | ❌ No | ✅ Yes |
+| Operator Transfer (Outbound) | ❌ No | ✅ Yes |
+| Inbound Handling | ✅ Direct to agent | ✅ Direct to agent |
+| Inbound Result | `disconnected` (DISCONNECTED) | `disconnected` (DISCONNECTED) |
 | "Yes" Prompt | ✅ Plays then disconnects | ✅ Plays then transfers |
-| "Onhold" Prompt | ❌ Never plays | ✅ Plays during transfer |
+| "Onhold" Prompt | ❌ Never plays (outbound) | ✅ Plays during transfer |
 | "Number" Prompt | ✅ Yes (for "where did you get my number") | ❌ No |
 | Result for YES | `connected_to_operator` | `connected_to_operator` |
 | Panel Status for YES | CONNECTED | CONNECTED |

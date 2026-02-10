@@ -211,7 +211,18 @@ class MarketingScenario(BaseScenario):
         logger.debug("Outbound channel ready for session %s", session.session_id)
 
     async def on_inbound_channel_created(self, session: Session) -> None:
-        logger.debug("Inbound call entered session %s; outbound scenario not used", session.session_id)
+        """
+        Inbound calls skip the marketing scenario entirely and are directly
+        connected to an available agent's mobile phone.  The result for all
+        inbound calls is reported as ``disconnected`` to the panel.
+        """
+        async with session.lock:
+            session.metadata["inbound_direct"] = "1"
+        logger.info("Inbound call session %s – connecting directly to agent", session.session_id)
+
+        # Play hold music while we originate the operator leg.
+        await self._play_onhold(session)
+        await self._connect_to_operator(session)
 
     async def on_operator_channel_created(self, session: Session) -> None:
         logger.debug("Operator leg created for session %s", session.session_id)
@@ -219,11 +230,22 @@ class MarketingScenario(BaseScenario):
     async def on_call_answered(self, session: Session, leg: CallLeg) -> None:
         if leg.direction == LegDirection.OPERATOR:
             async with session.lock:
-                session.result = session.result or "connected_to_operator"
+                is_inbound_direct = session.metadata.get("inbound_direct") == "1"
+                session.result = session.result or (
+                    "disconnected" if is_inbound_direct else "connected_to_operator"
+                )
                 session.metadata["operator_connected"] = "1"
             await self._stop_onhold_playbacks(session)
-            logger.info("Operator leg answered for session %s", session.session_id)
+            logger.info("Operator leg answered for session %s (inbound_direct=%s)", session.session_id, is_inbound_direct)
             return
+
+        # Inbound-direct sessions skip the marketing flow entirely;
+        # operator transfer is already initiated by on_inbound_channel_created().
+        async with session.lock:
+            if session.metadata.get("inbound_direct") == "1":
+                session.metadata["answered_at"] = str(time.time())
+                logger.info("Inbound-direct call answered for session %s – waiting for operator", session.session_id)
+                return
 
         async with session.lock:
             session.metadata["answered_at"] = str(time.time())
@@ -295,9 +317,12 @@ class MarketingScenario(BaseScenario):
             await self._stop_onhold_playbacks(session)
             async with session.lock:
                 yes_intent = session.metadata.get("intent_yes") == "1"
+                is_inbound_direct = session.metadata.get("inbound_direct") == "1"
             # Check if operator origination already set failed:operator_failed
             current_result = session.result
-            if current_result and current_result.startswith("failed:operator"):
+            if is_inbound_direct:
+                result_value = "disconnected"
+            elif current_result and current_result.startswith("failed:operator"):
                 # Keep the failed:operator_failed result, don't override
                 result_value = current_result
             else:
@@ -357,6 +382,7 @@ class MarketingScenario(BaseScenario):
         no_intent = False
         app_hangup = False
         operator_call_started = False
+        is_inbound_direct = False
         cause = None
         async with session.lock:
             session.metadata["hungup"] = "1"
@@ -365,8 +391,12 @@ class MarketingScenario(BaseScenario):
             no_intent = session.metadata.get("intent_no") == "1"
             app_hangup = session.metadata.get("app_hangup") == "1"
             operator_call_started = session.metadata.get("operator_call_started") == "1"
+            is_inbound_direct = session.metadata.get("inbound_direct") == "1"
             cause = session.metadata.get("hangup_cause")
         if operator_connected:
+            # For inbound-direct, always report "disconnected" even when operator was connected.
+            if is_inbound_direct:
+                await self._set_result(session, "disconnected", force=True, report=True)
             return
         # If customer hung up while we were still trying to reach an operator, immediately stop that leg.
         if operator_call_started and session.operator_leg and session.operator_leg.channel_id:
@@ -423,8 +453,12 @@ class MarketingScenario(BaseScenario):
 
     async def on_call_finished(self, session: Session) -> None:
         async with session.lock:
+            is_inbound_direct = session.metadata.get("inbound_direct") == "1"
             if session.result is None:
-                session.result = "user_didnt_answer"
+                session.result = "disconnected" if is_inbound_direct else "user_didnt_answer"
+            elif is_inbound_direct and session.result not in ("disconnected",):
+                # Force all inbound-direct results to "disconnected" for panel reporting.
+                session.result = "disconnected"
             result = session.result
             operator_mobile = session.metadata.get("operator_mobile")
         if operator_mobile:
@@ -893,9 +927,6 @@ class MarketingScenario(BaseScenario):
             if session.metadata.get("operator_call_started") == "1":
                 logger.debug("Operator call already started for session %s; skipping", session.session_id)
                 return
-            if self._is_inbound_only(session):
-                logger.debug("Inbound-only session %s; skipping operator connect", session.session_id)
-                return
             session.metadata["operator_call_started"] = "1"
             session.metadata.pop("operator_tried", None)
         customer_channel = self._customer_channel_id(session)
@@ -907,14 +938,21 @@ class MarketingScenario(BaseScenario):
         endpoint = ""
         operator_mobile = None
         outbound_line = None
+        is_inbound_direct = session.metadata.get("inbound_direct") == "1"
         if self.agent_mobiles:
             operator_mobile = self._next_available_agent()
             if not operator_mobile:
                 logger.warning("No available operator mobiles to connect session %s", session.session_id)
+                if is_inbound_direct:
+                    await self._set_result(session, "disconnected", force=True, report=True)
+                    await self._hangup(session)
                 return
             outbound_line = await self._reserve_outbound_line()
             if not outbound_line:
                 logger.warning("No available outbound line to reach operator mobile for session %s", session.session_id)
+                if is_inbound_direct:
+                    await self._set_result(session, "disconnected", force=True, report=True)
+                    await self._hangup(session)
                 return
             endpoint = f"PJSIP/{operator_mobile}@{self.settings.dialer.outbound_trunk}"
         else:
@@ -1022,11 +1060,6 @@ class MarketingScenario(BaseScenario):
 
     def _callbacks_for_phase(self, phase: str) -> tuple[Callable[[Session], Awaitable[None]], Callable[[Session], Awaitable[None]]]:
         return self._handle_yes, self._handle_no
-
-    def _is_inbound_only(self, session: Session) -> bool:
-        # Inbound calls should follow the same flow (including operator transfer)
-        # so never block operator connect for inbound-only sessions.
-        return False
 
     # Result reporting ----------------------------------------------------
     async def _report_result(self, session: Session) -> None:
@@ -1166,9 +1199,12 @@ class MarketingScenario(BaseScenario):
             status = "HANGUP"
             reason = "Caller hung up"
         elif result == "disconnected":
-            # Agrad only: operator transfer failed
             status = "DISCONNECTED"
-            reason = "Caller said yes but disconnected before operator answered"
+            is_inbound_direct = session.metadata.get("inbound_direct") == "1"
+            if is_inbound_direct:
+                reason = "Inbound call connected to agent"
+            else:
+                reason = "Caller said yes but disconnected before operator answered"
         elif result == "unknown":
             status = "UNKNOWN"
             reason = "Unknown intent"
