@@ -107,7 +107,10 @@ async def async_main() -> None:
         )
     # Initialize multi-scenario architecture
     logger.info("Loading scenarios from %s", settings.scenarios_dir)
-    scenario_registry = ScenarioRegistry(scenarios_dir=settings.scenarios_dir)
+    scenario_registry = ScenarioRegistry(
+        scenarios_dir=settings.scenarios_dir,
+        company=settings.company,
+    )
     logger.info("Loaded %d scenarios: %s", len(scenario_registry.get_names()), scenario_registry.get_names())
 
     # Create SessionManager with scenario registry

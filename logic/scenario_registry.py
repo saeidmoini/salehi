@@ -68,6 +68,7 @@ def _parse_scenario(data: dict) -> ScenarioConfig:
         name=sc.get("name", ""),
         display_name=sc.get("display_name", sc.get("name", "")),
         panel_name=sc.get("panel_name", sc.get("name", "")),
+        company=sc.get("company", ""),
         prompts=prompts,
         stt=stt,
         llm=llm,
@@ -81,11 +82,12 @@ class ScenarioRegistry:
     Loads scenario YAML files and provides round-robin access.
     """
 
-    def __init__(self, scenarios_dir: str = "config/scenarios"):
+    def __init__(self, scenarios_dir: str = "config/scenarios", company: str = ""):
         self._scenarios: Dict[str, ScenarioConfig] = {}
         self._enabled: List[str] = []
         self._outbound_cursor: int = 0
         self._inbound_cursor: int = 0
+        self._company = (company or "").strip().lower()
         self._load_all(scenarios_dir)
 
     def _load_all(self, scenarios_dir: str) -> None:
@@ -103,6 +105,13 @@ class ScenarioRegistry:
                 config = _parse_scenario(data)
                 if not config.name:
                     config.name = yaml_file.stem
+                scenario_company = (config.company or "").strip().lower()
+                if self._company and scenario_company and scenario_company != self._company:
+                    logger.info(
+                        "Skipping scenario '%s' from %s (company=%s, current=%s)",
+                        config.name, yaml_file.name, scenario_company, self._company
+                    )
+                    continue
                 self._scenarios[config.name] = config
                 self._enabled.append(config.name)
                 logger.info("Loaded scenario '%s' from %s (%d outbound steps, %d inbound steps)",

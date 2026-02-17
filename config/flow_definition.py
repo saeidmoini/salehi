@@ -63,6 +63,7 @@ class ScenarioConfig:
     name: str
     display_name: str = ""
     panel_name: str = ""
+    company: str = ""
 
     # Prompt key -> ARI media path
     prompts: Dict[str, str] = field(default_factory=dict)
