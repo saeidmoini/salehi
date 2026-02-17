@@ -1,6 +1,7 @@
 scenario:
   name: agrad_marketing
   display_name: "Agrad Marketing Campaign"
+  panel_name: default
 
   prompts:
     hello: "sound:custom/hello"

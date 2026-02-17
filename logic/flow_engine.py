@@ -1075,6 +1075,7 @@ class FlowEngine(BaseScenario):
             session.metadata["panel_last_status"] = status
 
         scenario_name = session.metadata.get("scenario_name")
+        panel_scenario_name = self.registry.get_panel_name(scenario_name)
         outbound_line = session.metadata.get("outbound_line")
 
         await self.panel_client.report_result(
@@ -1087,7 +1088,7 @@ class FlowEngine(BaseScenario):
             agent_id=session.metadata.get("operator_agent_id"),
             agent_phone=session.metadata.get("operator_mobile"),
             user_message=user_message if status in {"UNKNOWN", "DISCONNECTED", "CONNECTED", "NOT_INTERESTED", "INBOUND_CALL"} else None,
-            scenario=scenario_name,
+            scenario=panel_scenario_name,
             outbound_line=outbound_line,
         )
 

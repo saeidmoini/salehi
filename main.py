@@ -143,7 +143,7 @@ async def async_main() -> None:
 
     # Register available scenarios with panel
     if panel_client:
-        scenario_names = scenario_registry.get_names()
+        scenario_names = scenario_registry.get_panel_names()
         if scenario_names:
             await panel_client.register_scenarios(scenario_names)
             logger.info("Registered %d scenarios with panel", len(scenario_names))

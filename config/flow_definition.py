@@ -62,6 +62,7 @@ class ScenarioConfig:
     """Full scenario configuration loaded from YAML."""
     name: str
     display_name: str = ""
+    panel_name: str = ""
 
     # Prompt key -> ARI media path
     prompts: Dict[str, str] = field(default_factory=dict)
