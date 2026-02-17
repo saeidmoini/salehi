@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Deque, Dict, Optional, Tuple
 
 from core.ari_client import AriClient
+from logic.scenario_registry import ScenarioRegistry
 from sessions.session import (
     BridgeInfo,
     CallLeg,
@@ -30,11 +31,13 @@ class SessionManager:
         self,
         ari_client: AriClient,
         scenario_handler,
+        scenario_registry: Optional[ScenarioRegistry] = None,
         allowed_inbound_numbers: Optional[list[str]] = None,
         max_inbound_calls: Optional[int] = None,
     ):
         self.ari_client = ari_client
         self.scenario_handler = scenario_handler
+        self.scenario_registry = scenario_registry
         self.sessions: Dict[str, Session] = {}
         self.channel_to_session: Dict[str, str] = {}
         self.playback_to_session: Dict[str, str] = {}
@@ -254,6 +257,14 @@ class SessionManager:
                     session.metadata["inbound_line"] = inbound_line
                 if waiting_for_slot:
                     session.metadata["inbound_waiting"] = "1"
+
+                # Assign scenario via round-robin for inbound calls
+                if self.scenario_registry:
+                    scenario_name = self.scenario_registry.next_inbound_scenario()
+                    if scenario_name:
+                        session.metadata["scenario_name"] = scenario_name
+                        logger.debug("Assigned inbound scenario '%s' to session %s", scenario_name, session_id)
+
                 caller_num = session.metadata.get("caller_number")
             async with self.lock:
                 self.sessions[session_id] = session

@@ -212,17 +212,10 @@ class MarketingScenario(BaseScenario):
 
     async def on_inbound_channel_created(self, session: Session) -> None:
         """
-        Inbound calls skip the marketing scenario entirely and are directly
-        connected to an available agent's mobile phone.  The result for all
-        inbound calls is reported as ``disconnected`` to the panel.
+        Inbound calls now go through the same marketing scenario as outbound calls.
+        No special handling - they will hear the same prompts and get classified by LLM.
         """
-        async with session.lock:
-            session.metadata["inbound_direct"] = "1"
-        logger.info("Inbound call session %s – connecting directly to agent", session.session_id)
-
-        # Play hold music while we originate the operator leg.
-        await self._play_onhold(session)
-        await self._connect_to_operator(session)
+        logger.info("Inbound call session %s – will go through normal marketing flow", session.session_id)
 
     async def on_operator_channel_created(self, session: Session) -> None:
         logger.debug("Operator leg created for session %s", session.session_id)
@@ -230,23 +223,13 @@ class MarketingScenario(BaseScenario):
     async def on_call_answered(self, session: Session, leg: CallLeg) -> None:
         if leg.direction == LegDirection.OPERATOR:
             async with session.lock:
-                is_inbound_direct = session.metadata.get("inbound_direct") == "1"
-                session.result = session.result or (
-                    "disconnected" if is_inbound_direct else "connected_to_operator"
-                )
+                session.result = session.result or "connected_to_operator"
                 session.metadata["operator_connected"] = "1"
             await self._stop_onhold_playbacks(session)
-            logger.info("Operator leg answered for session %s (inbound_direct=%s)", session.session_id, is_inbound_direct)
+            logger.info("Operator leg answered for session %s", session.session_id)
             return
 
-        # Inbound-direct sessions skip the marketing flow entirely;
-        # operator transfer is already initiated by on_inbound_channel_created().
-        async with session.lock:
-            if session.metadata.get("inbound_direct") == "1":
-                session.metadata["answered_at"] = str(time.time())
-                logger.info("Inbound-direct call answered for session %s – waiting for operator", session.session_id)
-                return
-
+        # Customer leg answered - start marketing flow
         async with session.lock:
             session.metadata["answered_at"] = str(time.time())
         logger.info("Call answered for session %s (customer)", session.session_id)
@@ -275,8 +258,8 @@ class MarketingScenario(BaseScenario):
                 await asyncio.sleep(0.5)
                 await self._connect_to_operator(session)
             else:
-                # Salehi scenario: customer said yes, mark as connected (successful) and end call
-                await self._set_result(session, "connected_to_operator", force=True, report=True)
+                # Salehi scenario: customer said yes, mark as disconnected (we hang up, no operator transfer)
+                await self._set_result(session, "disconnected", force=True, report=False)
                 await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
@@ -317,18 +300,15 @@ class MarketingScenario(BaseScenario):
             await self._stop_onhold_playbacks(session)
             async with session.lock:
                 yes_intent = session.metadata.get("intent_yes") == "1"
-                is_inbound_direct = session.metadata.get("inbound_direct") == "1"
             # Check if operator origination already set failed:operator_failed
             current_result = session.result
-            if is_inbound_direct:
-                result_value = "disconnected"
-            elif current_result and current_result.startswith("failed:operator"):
+            if current_result and current_result.startswith("failed:operator"):
                 # Keep the failed:operator_failed result, don't override
                 result_value = current_result
             else:
                 # No specific operator failure set, use disconnected/hangup
                 result_value = "disconnected" if yes_intent else "hangup"
-            await self._set_result(session, result_value, force=True, report=True)
+            await self._set_result(session, result_value, force=True, report=False)
             await self._hangup(session)
             return
         # Customer leg failed/busy/unanswered => classify based on reason and cause codes
@@ -371,7 +351,7 @@ class MarketingScenario(BaseScenario):
         else:
             result_value = "missed"
 
-        await self._set_result(session, result_value, force=True, report=True)
+        await self._set_result(session, result_value, force=True, report=False)
         logger.warning("Call failed session=%s reason=%s dialstatus=%s cause=%s result=%s",
                       session.session_id, reason, dialstatus, hangup_cause, result_value)
         await self._hangup(session)
@@ -382,7 +362,6 @@ class MarketingScenario(BaseScenario):
         no_intent = False
         app_hangup = False
         operator_call_started = False
-        is_inbound_direct = False
         cause = None
         async with session.lock:
             session.metadata["hungup"] = "1"
@@ -391,12 +370,9 @@ class MarketingScenario(BaseScenario):
             no_intent = session.metadata.get("intent_no") == "1"
             app_hangup = session.metadata.get("app_hangup") == "1"
             operator_call_started = session.metadata.get("operator_call_started") == "1"
-            is_inbound_direct = session.metadata.get("inbound_direct") == "1"
             cause = session.metadata.get("hangup_cause")
         if operator_connected:
-            # For inbound-direct, always report "disconnected" even when operator was connected.
-            if is_inbound_direct:
-                await self._set_result(session, "disconnected", force=True, report=True)
+            # Operator already answered, result already set to "connected_to_operator"
             return
         # If customer hung up while we were still trying to reach an operator, immediately stop that leg.
         if operator_call_started and session.operator_leg and session.operator_leg.channel_id:
@@ -408,7 +384,7 @@ class MarketingScenario(BaseScenario):
                 session.metadata.pop("operator_mobile", None)
                 session.metadata.pop("operator_outbound_line", None)
                 session.metadata.pop("operator_endpoint", None)
-            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._set_result(session, "disconnected", force=True, report=False)
             await self._stop_onhold_playbacks(session)
             return
         # If user said no and hung up during goodbye, mark as hangup (not interested already recorded).
@@ -435,32 +411,77 @@ class MarketingScenario(BaseScenario):
             elif cause_txt and "Congested" in cause_txt:
                 cause_result = "banned"
         if cause_result and (session.result is None or session.result in {"user_didnt_answer", "missed", "hangup", "disconnected"}):
-            await self._set_result(session, cause_result, force=True, report=True)
+            await self._set_result(session, cause_result, force=True, report=False)
             await self._stop_onhold_playbacks(session)
             await self._hangup(session)
             return
         if session.result is None or session.result in {"user_didnt_answer", "missed"}:
             if yes_intent:
-                await self._set_result(session, "disconnected", force=True, report=True)
+                await self._set_result(session, "disconnected", force=True, report=False)
             elif no_intent:
-                await self._set_result(session, "not_interested", force=True, report=True)
+                await self._set_result(session, "not_interested", force=True, report=False)
             elif not app_hangup:
-                await self._set_result(session, "hangup", force=True, report=True)
+                await self._set_result(session, "hangup", force=True, report=False)
             else:
-                await self._set_result(session, session.result or "failed:hangup", force=True, report=True)
+                await self._set_result(session, session.result or "failed:hangup", force=True, report=False)
         logger.debug("Call hangup signaled for session %s", session.session_id)
         await self._stop_onhold_playbacks(session)
 
     async def on_call_finished(self, session: Session) -> None:
         async with session.lock:
-            is_inbound_direct = session.metadata.get("inbound_direct") == "1"
-            if session.result is None:
-                session.result = "disconnected" if is_inbound_direct else "user_didnt_answer"
-            elif is_inbound_direct and session.result not in ("disconnected",):
-                # Force all inbound-direct results to "disconnected" for panel reporting.
+            # Determine FINAL result based on priority logic
+            # Priority: operator_connected > intent_yes/no > failures > unknown > hangup > cause_codes > missed
+
+            operator_connected = session.metadata.get("operator_connected") == "1"
+            intent_yes = session.metadata.get("intent_yes") == "1"
+            intent_no = session.metadata.get("intent_no") == "1"
+
+            # Priority 1: Operator connected (highest priority - successful transfer)
+            if operator_connected:
+                session.result = "connected_to_operator"
+
+            # Priority 2: Customer said NO (explicit rejection)
+            elif intent_no:
+                session.result = "not_interested"
+
+            # Priority 3: Customer said YES
+            elif intent_yes:
+                # For Salehi: always disconnected (we hang up, no operator)
+                # For Agrad: disconnected if operator didn't answer (operator_connected=False)
                 session.result = "disconnected"
+
+            # Priority 4: Technical failures (preserve if already set)
+            elif session.result and (session.result.startswith("failed:") or session.result == "failed"):
+                # Keep the failure result (vira_quota, llm_quota, stt_failure, etc.)
+                pass
+
+            # Priority 5: Unknown intent (customer answered but unclear)
+            elif session.result == "unknown":
+                # Keep unknown
+                pass
+
+            # Priority 6: Hangup (customer answered then hung up, no intent)
+            elif session.result == "hangup":
+                # Keep hangup
+                pass
+
+            # Priority 7: SIP cause codes (busy, power_off, banned)
+            elif session.result in {"busy", "power_off", "banned"}:
+                # Keep cause-based result
+                pass
+
+            # Priority 8: No answer / timeout
+            elif session.result in {"missed", "user_didnt_answer"}:
+                # Keep missed
+                pass
+
+            # Default: customer never answered
+            else:
+                session.result = "user_didnt_answer"
+
             result = session.result
             operator_mobile = session.metadata.get("operator_mobile")
+
         if operator_mobile:
             self.agent_busy.discard(operator_mobile)
         line_used = session.metadata.get("operator_outbound_line")
@@ -608,7 +629,7 @@ class MarketingScenario(BaseScenario):
                     session.session_id,
                     phase,
                 )
-                await self._set_result(session, "hangup", force=True, report=True)
+                await self._set_result(session, "hangup", force=True, report=False)
                 return
             stt_result: STTResult = await self.stt_client.transcribe_audio(
                 audio_bytes, hotwords=self.stt_hotwords
@@ -659,7 +680,7 @@ class MarketingScenario(BaseScenario):
             if is_vira_quota_error:
                 async with session.lock:
                     session.metadata["panel_last_status"] = "FAILED"
-                await self._set_result(session, "failed:vira_quota", force=True, report=True)
+                await self._set_result(session, "failed:vira_quota", force=True, report=False)
                 if self.dialer:
                     # Force immediate pause/alert like LLM quota exhaustion
                     threshold = self.dialer.settings.sms.fail_alert_threshold
@@ -678,7 +699,7 @@ class MarketingScenario(BaseScenario):
 
             # If Vira says empty audio, treat as user hangup.
             if "Empty Audio file" in msg or "Input file content is unexpected" in msg:
-                await self._set_result(session, "hangup", force=True, report=True)
+                await self._set_result(session, "hangup", force=True, report=False)
                 return
             await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
 
@@ -829,7 +850,7 @@ class MarketingScenario(BaseScenario):
         """
         async with session.lock:
             session.metadata["panel_last_status"] = "FAILED"
-        await self._set_result(session, "failed:llm_quota", force=True, report=True)
+        await self._set_result(session, "failed:llm_quota", force=True, report=False)
         number_id = session.metadata.get("number_id")
         phone = session.metadata.get("contact_number")
         batch_id = session.metadata.get("batch_id")
@@ -877,7 +898,7 @@ class MarketingScenario(BaseScenario):
     async def _handle_no(self, session: Session) -> None:
         async with session.lock:
             session.metadata["intent_no"] = "1"
-        await self._set_result(session, "not_interested", force=True, report=True)
+        await self._set_result(session, "not_interested", force=True, report=False)
         await self._play_prompt(session, "goodby")
 
     async def _handle_no_response(
@@ -901,17 +922,18 @@ class MarketingScenario(BaseScenario):
             session.session_id,
         )
         if "intent_unknown" in reason or reason == "unknown":
-            await self._set_result(session, "unknown", force=True, report=True)
+            await self._set_result(session, "unknown", force=True, report=False)
             await self._play_prompt(session, "goodby")
             return
         if reason == "empty_transcript":
-            await self._set_result(session, "hangup", force=True, report=True)
+            await self._set_result(session, "hangup", force=True, report=False)
             await self._play_prompt(session, "goodby")
             return
         if "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
-            await self._set_result(session, f"failed:{reason}", force=True, report=True)
+            await self._set_result(session, f"failed:{reason}", force=True, report=False)
         else:
-            await self._set_result(session, "missed", force=False, report=True)
+            # Call was answered but couldn't process - treat as technical failure
+            await self._set_result(session, f"failed:no_response", force=True, report=False)
         await self._play_prompt(session, "goodby")
 
     async def _handle_number_question(self, session: Session) -> None:
@@ -938,21 +960,16 @@ class MarketingScenario(BaseScenario):
         endpoint = ""
         operator_mobile = None
         outbound_line = None
-        is_inbound_direct = session.metadata.get("inbound_direct") == "1"
         if self.agent_mobiles:
             operator_mobile = self._next_available_agent()
             if not operator_mobile:
                 logger.warning("No available operator mobiles to connect session %s", session.session_id)
-                if is_inbound_direct:
-                    await self._set_result(session, "disconnected", force=True, report=True)
-                    await self._hangup(session)
+                # No agents available - will be handled as operator failed/disconnected
                 return
             outbound_line = await self._reserve_outbound_line()
             if not outbound_line:
                 logger.warning("No available outbound line to reach operator mobile for session %s", session.session_id)
-                if is_inbound_direct:
-                    await self._set_result(session, "disconnected", force=True, report=True)
-                    await self._hangup(session)
+                # No line available - will be handled as operator failed/disconnected
                 return
             endpoint = f"PJSIP/{operator_mobile}@{self.settings.dialer.outbound_trunk}"
         else:
@@ -1011,13 +1028,13 @@ class MarketingScenario(BaseScenario):
             next_mobile = self._next_available_agent()
         if not next_mobile:
             logger.warning("Operator retry: no available agents for session %s (reason=%s)", session.session_id, reason)
-            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._set_result(session, "disconnected", force=True, report=False)
             await self._hangup(session)
             return False
         outbound_line = await self._reserve_outbound_line()
         if not outbound_line:
             logger.warning("Operator retry: no outbound line for session %s", session.session_id)
-            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._set_result(session, "disconnected", force=True, report=False)
             await self._hangup(session)
             return False
         endpoint = f"PJSIP/{next_mobile}@{self.settings.dialer.outbound_trunk}"
@@ -1070,10 +1087,6 @@ class MarketingScenario(BaseScenario):
                 "responses": list(session.responses),
                 "session_id": session.session_id,
             }
-            last_reported = session.metadata.get("last_reported_result")
-            if last_reported == session.result:
-                return
-            session.metadata["last_reported_result"] = session.result
         logger.info("Report payload (stub): %s", payload)
         if self.dialer:
             await self.dialer.on_result(
@@ -1200,11 +1213,7 @@ class MarketingScenario(BaseScenario):
             reason = "Caller hung up"
         elif result == "disconnected":
             status = "DISCONNECTED"
-            is_inbound_direct = session.metadata.get("inbound_direct") == "1"
-            if is_inbound_direct:
-                reason = "Inbound call connected to agent"
-            else:
-                reason = "Caller said yes but disconnected before operator answered"
+            reason = "Call disconnected (customer said yes but operator unavailable, or Salehi scenario)"
         elif result == "unknown":
             status = "UNKNOWN"
             reason = "Unknown intent"

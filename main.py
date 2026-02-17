@@ -9,7 +9,8 @@ from core.ari_client import AriClient
 from core.ari_ws import AriWebSocketClient
 from llm.client import GapGPTClient
 from logic.dialer import Dialer
-from logic.marketing_outreach import MarketingScenario
+from logic.flow_engine import FlowEngine
+from logic.scenario_registry import ScenarioRegistry
 from integrations.panel.client import PanelClient
 from sessions.session_manager import SessionManager
 from stt_tts.vira_stt import ViraSTTClient
@@ -65,8 +66,7 @@ async def async_main() -> None:
     logger = logging.getLogger("app")
 
     # Ensure audio assets are converted and available to Asterisk without blocking the loop.
-    # Use scenario-specific audio source directory
-    await asyncio.to_thread(ensure_audio_assets, settings.audio, settings.scenario.audio_src_dir)
+    await asyncio.to_thread(ensure_audio_assets, settings.audio)
 
     stt_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_stt)
     tts_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_tts)
@@ -100,21 +100,53 @@ async def async_main() -> None:
         panel_client = PanelClient(
             base_url=settings.panel.base_url,
             api_token=settings.panel.api_token,
+            company=settings.company,
             timeout=settings.timeouts.http_timeout,
             max_connections=settings.concurrency.http_max_connections,
             default_retry=settings.dialer.default_retry,
         )
+    # Initialize multi-scenario architecture
+    logger.info("Loading scenarios from %s", settings.scenarios_dir)
+    scenario_registry = ScenarioRegistry(scenarios_dir=settings.scenarios_dir)
+    logger.info("Loaded %d scenarios: %s", len(scenario_registry.get_names()), scenario_registry.get_names())
+
+    # Create SessionManager with scenario registry
     session_manager = SessionManager(
         ari_client,
-        None,
+        scenario_handler=None,  # Will be set below
+        scenario_registry=scenario_registry,
         allowed_inbound_numbers=settings.dialer.outbound_numbers,
-        max_inbound_calls=settings.dialer.max_concurrent_inbound_calls,
-    )  # placeholder to allow scenario access
-    scenario = MarketingScenario(settings, ari_client, llm_client, stt_client, session_manager, panel_client)
-    session_manager.scenario_handler = scenario
-    dialer = Dialer(settings, ari_client, session_manager, panel_client=panel_client)
+    )
+
+    # Initialize FlowEngine with all clients
+    flow_engine = FlowEngine(
+        settings=settings,
+        ari_client=ari_client,
+        llm_client=llm_client,
+        stt_client=stt_client,
+        session_manager=session_manager,
+        registry=scenario_registry,
+        panel_client=panel_client,
+    )
+    session_manager.scenario_handler = flow_engine
+
+    # Initialize Dialer with scenario registry
+    dialer = Dialer(
+        settings,
+        ari_client,
+        session_manager,
+        scenario_registry=scenario_registry,
+        panel_client=panel_client,
+    )
     session_manager.attach_dialer(dialer)
-    scenario.attach_dialer(dialer)
+    flow_engine.attach_dialer(dialer)
+
+    # Register available scenarios with panel
+    if panel_client:
+        scenario_names = scenario_registry.get_names()
+        if scenario_names:
+            await panel_client.register_scenarios(scenario_names)
+            logger.info("Registered %d scenarios with panel", len(scenario_names))
 
     ws_client = AriWebSocketClient(settings.ari, session_manager.handle_event)
 

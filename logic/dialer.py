@@ -10,6 +10,7 @@ from config.settings import Settings
 from core.ari_client import AriClient
 from integrations.panel.client import NextBatchResponse, PanelClient, PanelNumber
 from integrations.sms.melipayamak import SMSClient
+from logic.scenario_registry import ScenarioRegistry
 from sessions.session import SessionStatus
 from sessions.session_manager import SessionManager
 
@@ -35,11 +36,13 @@ class Dialer:
         settings: Settings,
         ari_client: AriClient,
         session_manager: SessionManager,
+        scenario_registry: Optional[ScenarioRegistry] = None,
         panel_client: Optional[PanelClient] = None,
     ):
         self.settings = settings
         self.ari_client = ari_client
         self.session_manager = session_manager
+        self.scenario_registry = scenario_registry
         self.panel_client = panel_client
         self.contacts: Deque[ContactItem] = deque(
             [ContactItem(phone_number=number) for number in settings.dialer.static_contacts]
@@ -190,8 +193,8 @@ class Dialer:
         else:
             self.failure_streak = 0
 
-        # Immediate hard-stop for recording failures.
-        if result == "failed:recording_failed" and not self.paused_by_failures:
+        # Immediate hard-stop for quota/balance errors ONLY
+        if result in {"failed:vira_quota", "failed:llm_quota"} and not self.paused_by_failures:
             self.failure_streak = max(self.failure_streak, self.settings.sms.fail_alert_threshold)
             await self._handle_failure_threshold(
                 session_id, result, number_id, phone_number, batch_id, attempted_at_iso
@@ -262,6 +265,14 @@ class Dialer:
             if contact.batch_id:
                 metadata["batch_id"] = contact.batch_id
             metadata["outbound_line"] = line
+
+            # Assign scenario via round-robin
+            if self.scenario_registry:
+                scenario_name = self.scenario_registry.next_scenario()
+                if scenario_name:
+                    metadata["scenario_name"] = scenario_name
+                    logger.debug("Assigned scenario '%s' to contact %s", scenario_name, contact.phone_number)
+
             session = await self.session_manager.create_outbound_session(
                 contact_number=contact.phone_number,
                 metadata=metadata,
@@ -444,10 +455,33 @@ class Dialer:
 
         size = min(self.settings.dialer.batch_size, capacity)
         batch: NextBatchResponse = await self.panel_client.get_next_batch(size=size)
-        # Refresh operator roster from panel active_agents if configured.
-        if self.settings.operator.use_panel_agents and batch.agents:
-            handler = self.session_manager.scenario_handler
-            if handler and hasattr(handler, "set_panel_agents"):
+
+        # Update active scenarios from panel
+        if batch.active_scenarios and self.scenario_registry:
+            try:
+                self.scenario_registry.set_enabled(batch.active_scenarios)
+            except Exception as exc:
+                logger.warning("Failed to update active scenarios: %s", exc)
+
+        # Refresh operator rosters from panel
+        handler = self.session_manager.scenario_handler
+        if handler:
+            # Update inbound agents
+            if batch.inbound_agents and hasattr(handler, "set_inbound_agents"):
+                try:
+                    await handler.set_inbound_agents(batch.inbound_agents)
+                except Exception as exc:
+                    logger.warning("Failed to set inbound agents: %s", exc)
+
+            # Update outbound agents
+            if batch.outbound_agents and hasattr(handler, "set_outbound_agents"):
+                try:
+                    await handler.set_outbound_agents(batch.outbound_agents)
+                except Exception as exc:
+                    logger.warning("Failed to set outbound agents: %s", exc)
+
+            # Legacy: update agents (backward compatibility)
+            if self.settings.operator.use_panel_agents and batch.agents and hasattr(handler, "set_panel_agents"):
                 try:
                     await handler.set_panel_agents(batch.agents)
                 except Exception as exc:

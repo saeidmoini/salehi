@@ -1,0 +1,264 @@
+scenario:
+  name: salehi_language
+  display_name: "Salehi Language Academy"
+
+  prompts:
+    hello: "sound:custom/hello"
+    yes: "sound:custom/yes"
+    goodby: "sound:custom/goodby"
+    goodbye: "sound:custom/goodby"
+    number: "sound:custom/number"
+    onhold: "sound:custom/onhold"
+    alo: "sound:custom/alo"
+    repeat: "sound:custom/repeat"
+    processing: "sound:beep"
+
+  stt:
+    hotwords:
+      - "نه"
+      - "نیاز"
+      - "ندارم"
+      - "نمیخواهم"
+      - "نمیخوام"
+      - "ممنون"
+      - "ساعت"
+      - "زنگ"
+      - "وقت"
+      - "خصوصی"
+      - "شماره"
+      - "پاک"
+      - "حذف"
+      - "بچه"
+      - "کسی"
+      - "بفرستید"
+      - "دیگه"
+      - "تماس"
+      - "سرکار"
+      - "مدرس"
+      - "نگیرید"
+      - "بله"
+      - "اوکی"
+      - "آره"
+      - "باشه"
+      - "در"
+      - "خدمت"
+      - "خدمتم"
+      - "بفرمایید"
+      - "تضمین"
+      - "کجا"
+      - "کجاست"
+      - "قیمت"
+      - "قیمتش"
+      - "چنده"
+      - "سایت"
+      - "دارین"
+      - "دارید"
+      - "نمونه"
+      - "تدریس"
+      - "آدرس"
+      - "ترم"
+      - "ترمیکه"
+      - "اساتید"
+      - "کین"
+      - "دوره"
+      - "طول"
+      - "چقدره"
+      - "کتاب"
+      - "پایه"
+      - "هزینه"
+      - "سازمان"
+      - "مدرک"
+      - "معتبره"
+      - "سطح"
+      - "مهاجرت"
+      - "توضیح"
+      - "بدید"
+      - "نظر"
+      - "میدید"
+      - "شروع"
+      - "کنم"
+      - "حالا"
+      - "شما"
+      - "می‌خوام"
+      - "وصل"
+      - "کنید"
+      - "برگزار"
+      - "چطوری"
+      - "آنلاین"
+      - "آنلاینه"
+      - "آفلاین"
+      - "افلاینه"
+      - "اپلیکیشن"
+      - "اپلیکیشنی"
+      - "آموزشگاه"
+      - "اسم"
+      - "فیلم"
+      - "آموزشی"
+    max_duration: 10
+    max_silence: 2
+
+  llm:
+    prompt_template: |
+      Classify intent into one word: yes / no / number_question / unknown.
+      YES = interest or any question about price/place/time/links/who/where/how, requests for info or anything.
+      If the user names a course/level, treat it as YES (they want a course).
+      Examples YES: {yes_examples}.
+      NO = reject/decline/not interested. Examples NO: {no_examples}.
+      NUMBER_QUESTION = asks where we got their number.
+      User: {transcript}
+    intent_categories:
+      - "yes"
+      - "no"
+      - "number_question"
+      - "unknown"
+    fallback_tokens:
+      yes:
+        - "بله"
+        - "آره"
+        - "اوکی"
+        - "در خدمتم"
+        - "بفرمایید"
+        - "تضمین چیه"
+        - "کجا هستید"
+        - "قیمتش چنده"
+        - "سایت دارین"
+        - "نمونه تدریس"
+        - "آدرس کجاست"
+        - "ترمیکه"
+        - "اساتید کین"
+        - "طول دوره چقدره"
+        - "هزینه اش چقدره"
+        - "مدرک میدید"
+        - "وصل کنید"
+        - "دوره ایلتس"
+        - "دوره مکالمه"
+        - "آنلاینه"
+        - "افلاینه"
+      no:
+        - "نه"
+        - "نیاز ندارم"
+        - "نمیخواهم"
+        - "ممنون"
+        - "وقت ندارم"
+        - "شماره موپاک کنید"
+        - "دیگه بامن تماس نگیرید"
+        - "الان سرکارم"
+        - "خودم مدرسم"
+        - "شماره مو حذف کنید"
+      number_question:
+        - "شماره منو از کجا آوردی"
+        - "شماره منو از کجا آوردین"
+
+  # Outbound call flow: play hello -> record -> classify -> route
+  flow:
+    - step: start
+      type: entry
+      next: play_hello
+
+    - step: play_hello
+      type: play_prompt
+      prompt: hello
+      next: record_response
+
+    - step: record_response
+      type: record
+      next: classify
+      on_empty: hangup_empty
+      on_failure: hangup_failed
+
+    - step: classify
+      type: classify_intent
+      next: route
+      on_failure: hangup_failed
+
+    - step: route
+      type: route_by_intent
+      routes:
+        yes: handle_yes
+        no: handle_no
+        number_question: handle_number
+        unknown: handle_unknown
+
+    - step: handle_yes
+      type: play_prompt
+      prompt: yes
+      next: result_connected
+
+    - step: result_connected
+      type: set_result
+      result: connected_to_operator
+      next: do_disconnect
+
+    - step: handle_no
+      type: play_prompt
+      prompt: goodby
+      next: result_not_interested
+
+    - step: result_not_interested
+      type: set_result
+      result: not_interested
+      next: do_hangup
+
+    - step: handle_number
+      type: play_prompt
+      prompt: number
+      next: record_response
+
+    - step: handle_unknown
+      type: play_prompt
+      prompt: goodby
+      next: result_unknown
+
+    - step: result_unknown
+      type: set_result
+      result: unknown
+      next: do_hangup
+
+    - step: hangup_empty
+      type: set_result
+      result: hangup
+      next: do_disconnect
+
+    - step: hangup_failed
+      type: set_result
+      result: "failed:recording"
+      next: do_hangup
+
+    - step: do_disconnect
+      type: disconnect
+
+    - step: do_hangup
+      type: hangup
+
+  # Inbound: play onhold -> connect to agent
+  inbound_flow:
+    - step: start
+      type: entry
+      next: play_onhold
+
+    - step: play_onhold
+      type: play_prompt
+      prompt: onhold
+      next: connect_agent
+
+    - step: connect_agent
+      type: transfer_to_operator
+      agent_type: inbound
+      on_success: result_inbound
+      on_failure: result_disconnected
+
+    - step: result_inbound
+      type: set_result
+      result: inbound_call
+      next: wait_hangup
+
+    - step: result_disconnected
+      type: set_result
+      result: disconnected
+      next: do_hangup
+
+    - step: wait_hangup
+      type: wait
+
+    - step: do_hangup
+      type: hangup

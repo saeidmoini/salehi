@@ -45,6 +45,7 @@ class BridgeInfo:
 @dataclass
 class Session:
     session_id: str
+    scenario_name: Optional[str] = None
     bridge: Optional[BridgeInfo] = None
     inbound_leg: Optional[CallLeg] = None
     outbound_leg: Optional[CallLeg] = None

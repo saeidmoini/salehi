@@ -83,8 +83,6 @@ class DialerSettings:
     default_caller_id: str
     origination_timeout: int
     max_concurrent_calls: int
-    max_concurrent_outbound_calls: int
-    max_concurrent_inbound_calls: int
     max_calls_per_minute: int
     max_calls_per_day: int
     max_originations_per_second: float
@@ -121,17 +119,10 @@ class SMSSettings:
 
 
 @dataclass
-class ScenarioSettings:
-    """
-    Scenario configuration to support different call flows.
-
-    Scenarios:
-    - salehi: On YES intent, play "yes" prompt then disconnect (no operator transfer)
-    - agrad: On YES intent, play "yes" + "onhold" then connect to operator
-    """
-    name: str  # "salehi" or "agrad"
-    transfer_to_operator: bool  # Whether to transfer YES intents to operator
-    audio_src_dir: str  # Scenario-specific audio source directory
+class PanelSettings:
+    base_url: str
+    api_token: str
+    company: str
 
 
 @dataclass
@@ -141,19 +132,14 @@ class Settings:
     vira: ViraSettings
     dialer: DialerSettings
     operator: OperatorSettings
-    panel: "PanelSettings"
+    panel: PanelSettings
     audio: AudioSettings
     concurrency: ConcurrencySettings
     timeouts: TimeoutSettings
     sms: SMSSettings
-    scenario: ScenarioSettings
+    company: str
+    scenarios_dir: str
     log_level: str
-
-
-@dataclass
-class PanelSettings:
-    base_url: str
-    api_token: str
 
 
 def get_settings() -> Settings:
@@ -197,8 +183,6 @@ def get_settings() -> Settings:
         default_caller_id=os.getenv("DEFAULT_CALLER_ID", "1000"),
         origination_timeout=int(os.getenv("ORIGINATION_TIMEOUT", "30")),
         max_concurrent_calls=int(os.getenv("MAX_CONCURRENT_CALLS", "2")),
-        max_concurrent_outbound_calls=int(os.getenv("MAX_CONCURRENT_OUTBOUND_CALLS", os.getenv("MAX_CONCURRENT_CALLS", "2"))),
-        max_concurrent_inbound_calls=int(os.getenv("MAX_CONCURRENT_INBOUND_CALLS", os.getenv("MAX_CONCURRENT_CALLS", "2"))),
         max_calls_per_minute=int(os.getenv("MAX_CALLS_PER_MINUTE", "10")),
         max_calls_per_day=int(os.getenv("MAX_CALLS_PER_DAY", "200")),
         max_originations_per_second=float(os.getenv("MAX_ORIGINATIONS_PER_SECOND", "3")),
@@ -219,9 +203,12 @@ def get_settings() -> Settings:
         use_panel_agents=os.getenv("USE_PANEL_AGENTS", "false").lower() == "true",
     )
 
+    company = os.getenv("COMPANY", "salehi")
+
     panel = PanelSettings(
         base_url=os.getenv("PANEL_BASE_URL", ""),
         api_token=os.getenv("PANEL_API_TOKEN", ""),
+        company=company,
     )
 
     audio = AudioSettings(
@@ -252,14 +239,7 @@ def get_settings() -> Settings:
         fail_alert_threshold=int(os.getenv("FAIL_ALERT_THRESHOLD", "3")),
     )
 
-    # Scenario configuration
-    scenario_name = os.getenv("SCENARIO", "salehi").lower()
-    scenario = ScenarioSettings(
-        name=scenario_name,
-        transfer_to_operator=(scenario_name == "agrad"),
-        audio_src_dir=f"assets/audio/{scenario_name}/src",
-    )
-
+    scenarios_dir = os.getenv("SCENARIOS_DIR", "config/scenarios")
     log_level = os.getenv("LOG_LEVEL", "INFO")
 
     return Settings(
@@ -273,6 +253,7 @@ def get_settings() -> Settings:
         concurrency=concurrency,
         timeouts=timeouts,
         sms=sms,
-        scenario=scenario,
+        company=company,
+        scenarios_dir=scenarios_dir,
         log_level=log_level,
     )
