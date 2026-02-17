@@ -67,7 +67,6 @@ def _parse_scenario(data: dict) -> ScenarioConfig:
     return ScenarioConfig(
         name=sc.get("name", ""),
         display_name=sc.get("display_name", sc.get("name", "")),
-        panel_name=sc.get("panel_name", sc.get("name", "")),
         company=sc.get("company", ""),
         prompts=prompts,
         stt=stt,
@@ -128,24 +127,6 @@ class ScenarioRegistry:
     def get_names(self) -> List[str]:
         return list(self._scenarios.keys())
 
-    def get_panel_name(self, name: Optional[str]) -> Optional[str]:
-        if not name:
-            return None
-        scenario = self._scenarios.get(name)
-        if not scenario:
-            return None
-        return scenario.panel_name or scenario.name
-
-    def get_panel_names(self) -> List[str]:
-        names: List[str] = []
-        seen = set()
-        for scenario in self._scenarios.values():
-            panel_name = scenario.panel_name or scenario.name
-            if panel_name not in seen:
-                seen.add(panel_name)
-                names.append(panel_name)
-        return names
-
     def get_enabled(self) -> List[str]:
         return list(self._enabled)
 
@@ -159,25 +140,6 @@ class ScenarioRegistry:
             logger.info("Active scenarios updated: %s", valid)
         else:
             logger.warning("No valid scenarios in active_scenarios list: %s", names)
-
-    def set_enabled_by_panel_names(self, panel_names: List[str]) -> None:
-        """
-        Update enabled scenarios from panel-facing names.
-        Multiple internal scenarios may map to the same panel name.
-        """
-        requested = set(panel_names)
-        valid = [
-            name
-            for name, scenario in self._scenarios.items()
-            if (scenario.panel_name or scenario.name) in requested
-        ]
-        if valid:
-            self._enabled = valid
-            self._outbound_cursor = 0
-            self._inbound_cursor = 0
-            logger.info("Active scenarios updated by panel names %s => %s", panel_names, valid)
-        else:
-            logger.warning("No valid scenarios for panel active_scenarios list: %s", panel_names)
 
     def next_scenario(self) -> Optional[str]:
         """Round-robin pick from enabled scenarios for outbound contacts."""

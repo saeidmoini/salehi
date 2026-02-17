@@ -459,7 +459,7 @@ class Dialer:
         # Update active scenarios from panel
         if batch.active_scenarios and self.scenario_registry:
             try:
-                self.scenario_registry.set_enabled_by_panel_names(batch.active_scenarios)
+                self.scenario_registry.set_enabled(batch.active_scenarios)
             except Exception as exc:
                 logger.warning("Failed to update active scenarios: %s", exc)
 
