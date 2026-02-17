@@ -1,7 +1,7 @@
 scenario:
   name: salehi_language
   display_name: "Salehi Language Academy"
-  panel_name: salehi_default
+  panel_name: default
   company: salehi
 
   prompts:

@@ -1,7 +1,7 @@
 scenario:
   name: agrad_marketing
   display_name: "Agrad Marketing Campaign"
-  panel_name: agrad_default
+  panel_name: default
   company: agrad
 
   prompts:
