@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 class GapGPTClient:
     """
     Minimal async wrapper around GapGPT (OpenAI-compatible) chat completions.
+    Supports both JSON and SSE (text/event-stream) responses.
     """
 
     def __init__(
@@ -44,6 +46,33 @@ class GapGPTClient:
     async def close(self) -> None:
         await self.client.aclose()
 
+    def _extract_from_sse(self, raw: str) -> str:
+        """
+        Parse OpenAI-style SSE chunks and reconstruct assistant text.
+        """
+        parts: List[str] = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                item = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+            choices = item.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            chunk = delta.get("content")
+            if chunk:
+                parts.append(chunk)
+
+        return "".join(parts)
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -70,5 +99,11 @@ class GapGPTClient:
                 timeout=self.timeout,
             )
         response.raise_for_status()
+
+        content_type = (response.headers.get("content-type") or "").lower()
+        # Provider may return SSE stream by default instead of plain JSON.
+        if "text/event-stream" in content_type or response.text.lstrip().startswith("data:"):
+            return self._extract_from_sse(response.text)
+
         data = response.json()
         return data["choices"][0]["message"]["content"]
