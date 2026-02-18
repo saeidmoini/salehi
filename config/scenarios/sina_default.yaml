@@ -1,7 +1,7 @@
 scenario:
   name: default
-  display_name: "Agrad Marketing Campaign"
-  company: agrad
+  display_name: "Sina Marketing Campaign"
+  company: asinad
 
   prompts:
     hello: "sound:custom/hello"
