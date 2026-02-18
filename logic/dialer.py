@@ -542,12 +542,7 @@ class Dialer:
                 except Exception as exc:
                     logger.warning("Failed to set outbound agents: %s", exc)
 
-            # Legacy: update agents (backward compatibility)
-            if self.settings.operator.use_panel_agents and batch.agents and hasattr(handler, "set_panel_agents"):
-                try:
-                    await handler.set_panel_agents(batch.agents)
-                except Exception as exc:
-                    logger.warning("Failed to set panel agents: %s", exc)
+            # Legacy active_agents list is no longer used.
         if batch.call_allowed and self.paused_by_failures:
             logger.info("Panel re-enabled; resuming dialer after failures.")
             self.paused_by_failures = False
