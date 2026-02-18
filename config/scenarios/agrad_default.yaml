@@ -1,5 +1,5 @@
 scenario:
-  name: agrad_marketing
+  name: default
   display_name: "Agrad Marketing Campaign"
   company: agrad
 
