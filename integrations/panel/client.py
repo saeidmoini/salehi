@@ -23,6 +23,13 @@ class PanelAgent:
 
 
 @dataclass
+class PanelOutboundLine:
+    id: Optional[int]
+    phone_number: str
+    display_name: Optional[str] = None
+
+
+@dataclass
 class NextBatchResponse:
     call_allowed: bool
     retry_after_seconds: Optional[int]
@@ -31,6 +38,7 @@ class NextBatchResponse:
     inbound_agents: List[PanelAgent]
     outbound_agents: List[PanelAgent]
     active_scenarios: Optional[List[str]]
+    outbound_lines: List[PanelOutboundLine]
     batch_id: Optional[str]
     timezone: Optional[str]
     server_time: Optional[datetime]
@@ -79,7 +87,7 @@ class PanelClient:
             call_allowed=False,
             retry_after_seconds=self.default_retry,
             numbers=[], agents=[], inbound_agents=[], outbound_agents=[],
-            active_scenarios=None, batch_id=None, timezone=None,
+            active_scenarios=None, outbound_lines=[], batch_id=None, timezone=None,
             server_time=None, schedule_version=None,
         )
         try:
@@ -95,8 +103,9 @@ class PanelClient:
                 empty.server_time = self._parse_dt(data.get("server_time"))
                 empty.schedule_version = data.get("schedule_version")
                 empty.reason = data.get("reason")
-                # Still parse active_scenarios even when call_allowed=False
-                empty.active_scenarios = data.get("active_scenarios")
+                # Still parse scenario/line metadata even when call_allowed=False
+                empty.active_scenarios = self._parse_active_scenarios(data.get("active_scenarios"))
+                empty.outbound_lines = self._parse_outbound_lines(data.get("outbound_lines"))
                 return empty
             batch = data.get("batch", {}) or {}
             numbers = [
@@ -120,7 +129,8 @@ class PanelClient:
                 for agent in data.get("outbound_agents", []) or []
                 if agent.get("phone_number")
             ]
-            active_scenarios = data.get("active_scenarios")
+            active_scenarios = self._parse_active_scenarios(data.get("active_scenarios"))
+            outbound_lines = self._parse_outbound_lines(data.get("outbound_lines"))
             return NextBatchResponse(
                 call_allowed=True,
                 retry_after_seconds=None,
@@ -129,6 +139,7 @@ class PanelClient:
                 inbound_agents=inbound_agents,
                 outbound_agents=outbound_agents,
                 active_scenarios=active_scenarios,
+                outbound_lines=outbound_lines,
                 batch_id=batch.get("batch_id"),
                 timezone=data.get("timezone"),
                 server_time=self._parse_dt(data.get("server_time")),
@@ -229,3 +240,33 @@ class PanelClient:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except Exception:
             return None
+
+    @staticmethod
+    def _parse_active_scenarios(value) -> Optional[List[str]]:
+        if value is None:
+            return None
+        names: List[str] = []
+        for item in value or []:
+            if isinstance(item, str):
+                name = item.strip()
+            elif isinstance(item, dict):
+                name = str(item.get("name", "")).strip()
+            else:
+                name = ""
+            if name:
+                names.append(name)
+        return names
+
+    @staticmethod
+    def _parse_outbound_lines(value) -> List[PanelOutboundLine]:
+        lines: List[PanelOutboundLine] = []
+        for item in value or []:
+            if not isinstance(item, dict):
+                continue
+            phone = str(item.get("phone_number", "")).strip()
+            if not phone:
+                continue
+            line_id = item.get("id")
+            display_name = item.get("display_name")
+            lines.append(PanelOutboundLine(id=line_id, phone_number=phone, display_name=display_name))
+        return lines

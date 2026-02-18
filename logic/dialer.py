@@ -8,7 +8,7 @@ from typing import Deque, List, Optional
 
 from config.settings import Settings
 from core.ari_client import AriClient
-from integrations.panel.client import NextBatchResponse, PanelClient, PanelNumber
+from integrations.panel.client import NextBatchResponse, PanelClient, PanelNumber, PanelOutboundLine
 from integrations.sms.melipayamak import SMSClient
 from logic.scenario_registry import ScenarioRegistry
 from sessions.session import SessionStatus
@@ -48,18 +48,7 @@ class Dialer:
             [ContactItem(phone_number=number) for number in settings.dialer.static_contacts]
         )
         self.line_stats = {}
-        for num in settings.dialer.outbound_numbers:
-            norm = self._normalize_number(num)
-            if not norm:
-                continue
-            self.line_stats[norm] = {
-                "active": 0,
-                "inbound_active": 0,
-                "attempts": deque(),
-                "daily": 0,
-                "daily_marker": date.today(),
-                "last_originated_ts": 0.0,
-            }
+        self.enabled_lines: set[str] = set()
         self.attempt_timestamps: Deque[datetime] = deque()  # global per-minute
         self.daily_counter = 0  # global per-day
         self.daily_marker: date = date.today()
@@ -226,6 +215,44 @@ class Dialer:
         line = self._available_line()
         return line is not None
 
+    def _init_line_stats(self) -> dict:
+        return {
+            "active": 0,
+            "inbound_active": 0,
+            "attempts": deque(),
+            "daily": 0,
+            "daily_marker": date.today(),
+            "last_originated_ts": 0.0,
+        }
+
+    async def _update_outbound_lines(self, lines: List[PanelOutboundLine]) -> None:
+        normalized_lines = []
+        for item in lines:
+            norm = self._normalize_number(item.phone_number)
+            if norm:
+                normalized_lines.append(norm)
+        unique_lines = set(normalized_lines)
+        async with self.lock:
+            self.enabled_lines = unique_lines
+            for line in unique_lines:
+                if line not in self.line_stats:
+                    self.line_stats[line] = self._init_line_stats()
+
+            # Drop fully idle lines no longer configured by panel.
+            for line in list(self.line_stats.keys()):
+                if line in unique_lines:
+                    continue
+                stats = self.line_stats[line]
+                if (
+                    stats.get("active", 0) == 0
+                    and stats.get("inbound_active", 0) == 0
+                    and self.waiting_inbound.get(line, 0) == 0
+                ):
+                    del self.line_stats[line]
+
+        if hasattr(self.session_manager, "update_inbound_lines"):
+            self.session_manager.update_inbound_lines(list(unique_lines))
+
     def _prune_attempts(self) -> None:
         cutoff = datetime.utcnow() - timedelta(minutes=1)
         while self.attempt_timestamps and self.attempt_timestamps[0] < cutoff:
@@ -343,7 +370,10 @@ class Dialer:
         now_mono = time.monotonic()
         best = None
         best_load = None
-        for line, stats in self.line_stats.items():
+        for line in self.enabled_lines:
+            stats = self.line_stats.get(line)
+            if not stats:
+                continue
             if not line:
                 continue
             self._prune_line_attempts(stats)
@@ -450,11 +480,11 @@ class Dialer:
             return
 
         capacity = await self._available_capacity()
-        if capacity <= 0:
-            return
-
-        size = min(self.settings.dialer.batch_size, capacity)
+        size = min(self.settings.dialer.batch_size, max(1, capacity))
         batch: NextBatchResponse = await self.panel_client.get_next_batch(size=size)
+
+        # Outbound lines now come from panel in each batch response.
+        await self._update_outbound_lines(batch.outbound_lines)
 
         # Update active scenarios from panel
         if batch.active_scenarios and self.scenario_registry:
@@ -508,9 +538,14 @@ class Dialer:
         logger.info("Queued %d contacts from panel batch %s", len(items), batch_id)
 
     async def _available_capacity(self) -> int:
+        if not self.enabled_lines:
+            return 0
         available_slots = 0
         outbound_active_total = 0
-        for line, stats in self.line_stats.items():
+        for line in self.enabled_lines:
+            stats = self.line_stats.get(line)
+            if not stats:
+                continue
             if not line:
                 continue
             self._prune_line_attempts(stats)

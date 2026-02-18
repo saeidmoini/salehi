@@ -118,7 +118,6 @@ async def async_main() -> None:
         ari_client,
         scenario_handler=None,  # Will be set below
         scenario_registry=scenario_registry,
-        allowed_inbound_numbers=settings.dialer.outbound_numbers,
     )
 
     # Initialize FlowEngine with all clients

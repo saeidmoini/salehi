@@ -55,6 +55,14 @@ class SessionManager:
         self.dialer = None
         self.waiting_inbound: Dict[str, Deque[Tuple[str, str]]] = {}
 
+    def update_inbound_lines(self, lines: list[str]) -> None:
+        """
+        Refresh inbound line matching list at runtime from panel outbound_lines.
+        """
+        normalized = [self._normalize_number(n) for n in lines if n]
+        self.inbound_lines = [n for n in normalized if n]
+        self.allowed_inbound_numbers = set(self.inbound_lines)
+
     def _ensure_hangup_log_handler(self) -> None:
         # Add a dedicated rolling log for hangup tracing if not already present.
         for handler in self.hangup_logger.handlers:

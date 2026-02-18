@@ -79,7 +79,6 @@ class OperatorSettings:
 @dataclass
 class DialerSettings:
     outbound_trunk: str
-    outbound_numbers: List[str]
     default_caller_id: str
     origination_timeout: int
     max_concurrent_calls: int
@@ -179,7 +178,6 @@ def get_settings() -> Settings:
 
     dialer = DialerSettings(
         outbound_trunk=os.getenv("OUTBOUND_TRUNK", "TO-CUCM-Gaptel"),
-        outbound_numbers=_parse_list(os.getenv("OUTBOUND_NUMBERS", "")),
         default_caller_id=os.getenv("DEFAULT_CALLER_ID", "1000"),
         origination_timeout=int(os.getenv("ORIGINATION_TIMEOUT", "30")),
         max_concurrent_calls=int(os.getenv("MAX_CONCURRENT_CALLS", "2")),
