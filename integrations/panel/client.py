@@ -218,6 +218,23 @@ class PanelClient:
         except Exception as exc:
             logger.warning("Failed to register scenarios with panel: %s", exc)
 
+    async def register_outbound_lines(self, lines: List[dict]) -> None:
+        """
+        Register outbound lines with the panel.
+        Payload: { company, lines: [{phone_number, display_name}] }
+        """
+        if not lines:
+            return
+        payload = {"lines": lines}
+        if self.company:
+            payload["company"] = self.company
+        try:
+            resp = await self.client.post("/api/dialer/register-outbound-lines", json=payload)
+            resp.raise_for_status()
+            logger.info("Registered outbound lines with panel: %s", lines)
+        except Exception as exc:
+            logger.warning("Failed to register outbound lines with panel: %s", exc)
+
     async def flush_pending(self) -> None:
         async with self.lock:
             if not self.pending_reports:

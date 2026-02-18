@@ -49,6 +49,19 @@ class Dialer:
         )
         self.line_stats = {}
         self.enabled_lines: set[str] = set()
+        for num in settings.dialer.outbound_numbers:
+            norm = self._normalize_number(num)
+            if not norm:
+                continue
+            self.enabled_lines.add(norm)
+            self.line_stats[norm] = {
+                "active": 0,
+                "inbound_active": 0,
+                "attempts": deque(),
+                "daily": 0,
+                "daily_marker": date.today(),
+                "last_originated_ts": 0.0,
+            }
         self.line_id_by_number: dict[str, int] = {}
         self.scenario_id_by_name: dict[str, int] = {}
         self.attempt_timestamps: Deque[datetime] = deque()  # global per-minute

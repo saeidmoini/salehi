@@ -118,6 +118,7 @@ async def async_main() -> None:
         ari_client,
         scenario_handler=None,  # Will be set below
         scenario_registry=scenario_registry,
+        allowed_inbound_numbers=settings.dialer.outbound_numbers,
     )
 
     # Initialize FlowEngine with all clients
@@ -145,6 +146,21 @@ async def async_main() -> None:
 
     # Register available scenarios with panel
     if panel_client:
+        outbound_lines = []
+        for idx, num in enumerate(settings.dialer.outbound_numbers, start=1):
+            clean = num.strip()
+            if not clean:
+                continue
+            outbound_lines.append(
+                {
+                    "phone_number": clean,
+                    "display_name": f"Line {idx}",
+                }
+            )
+        if outbound_lines:
+            await panel_client.register_outbound_lines(outbound_lines)
+            logger.info("Registered %d outbound lines with panel", len(outbound_lines))
+
         scenarios = [
             {
                 "name": cfg.name,
