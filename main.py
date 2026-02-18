@@ -145,10 +145,16 @@ async def async_main() -> None:
 
     # Register available scenarios with panel
     if panel_client:
-        scenario_names = scenario_registry.get_names()
-        if scenario_names:
-            await panel_client.register_scenarios(scenario_names)
-            logger.info("Registered %d scenarios with panel", len(scenario_names))
+        scenarios = [
+            {
+                "name": cfg.name,
+                "display_name": cfg.display_name or cfg.name,
+            }
+            for cfg in scenario_registry.get_all().values()
+        ]
+        if scenarios:
+            await panel_client.register_scenarios(scenarios)
+            logger.info("Registered %d scenarios with panel", len(scenarios))
 
     ws_client = AriWebSocketClient(settings.ari, session_manager.handle_event)
 

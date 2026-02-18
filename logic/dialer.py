@@ -49,6 +49,8 @@ class Dialer:
         )
         self.line_stats = {}
         self.enabled_lines: set[str] = set()
+        self.line_id_by_number: dict[str, int] = {}
+        self.scenario_id_by_name: dict[str, int] = {}
         self.attempt_timestamps: Deque[datetime] = deque()  # global per-minute
         self.daily_counter = 0  # global per-day
         self.daily_marker: date = date.today()
@@ -227,13 +229,17 @@ class Dialer:
 
     async def _update_outbound_lines(self, lines: List[PanelOutboundLine]) -> None:
         normalized_lines = []
+        line_id_by_number: dict[str, int] = {}
         for item in lines:
             norm = self._normalize_number(item.phone_number)
             if norm:
                 normalized_lines.append(norm)
+                if item.id is not None:
+                    line_id_by_number[norm] = item.id
         unique_lines = set(normalized_lines)
         async with self.lock:
             self.enabled_lines = unique_lines
+            self.line_id_by_number = line_id_by_number
             for line in unique_lines:
                 if line not in self.line_stats:
                     self.line_stats[line] = self._init_line_stats()
@@ -292,12 +298,18 @@ class Dialer:
             if contact.batch_id:
                 metadata["batch_id"] = contact.batch_id
             metadata["outbound_line"] = line
+            line_id = self.line_id_by_number.get(line)
+            if line_id is not None:
+                metadata["outbound_line_id"] = line_id
 
             # Assign scenario via round-robin
             if self.scenario_registry:
                 scenario_name = self.scenario_registry.next_scenario()
                 if scenario_name:
                     metadata["scenario_name"] = scenario_name
+                    scenario_id = self.scenario_id_by_name.get(scenario_name)
+                    if scenario_id is not None:
+                        metadata["scenario_id"] = scenario_id
                     logger.debug("Assigned scenario '%s' to contact %s", scenario_name, contact.phone_number)
 
             session = await self.session_manager.create_outbound_session(
@@ -487,9 +499,16 @@ class Dialer:
         await self._update_outbound_lines(batch.outbound_lines)
 
         # Update active scenarios from panel
-        if batch.active_scenarios and self.scenario_registry:
+        if self.scenario_registry and batch.active_scenarios is not None:
             try:
-                self.scenario_registry.set_enabled(batch.active_scenarios)
+                self.scenario_id_by_name = {}
+                names = [s.name for s in batch.active_scenarios if s.name]
+                if names:
+                    self.scenario_registry.set_enabled(names)
+                    self.scenario_id_by_name = {
+                        s.name: s.id for s in batch.active_scenarios
+                        if s.name and s.id is not None
+                    }
             except Exception as exc:
                 logger.warning("Failed to update active scenarios: %s", exc)
 

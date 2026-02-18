@@ -30,6 +30,13 @@ class PanelOutboundLine:
 
 
 @dataclass
+class PanelScenario:
+    id: Optional[int]
+    name: str
+    display_name: Optional[str] = None
+
+
+@dataclass
 class NextBatchResponse:
     call_allowed: bool
     retry_after_seconds: Optional[int]
@@ -37,7 +44,7 @@ class NextBatchResponse:
     agents: List[PanelAgent]
     inbound_agents: List[PanelAgent]
     outbound_agents: List[PanelAgent]
-    active_scenarios: Optional[List[str]]
+    active_scenarios: Optional[List[PanelScenario]]
     outbound_lines: List[PanelOutboundLine]
     batch_id: Optional[str]
     timezone: Optional[str]
@@ -163,8 +170,8 @@ class PanelClient:
         agent_id: Optional[int] = None,
         agent_phone: Optional[str] = None,
         user_message: Optional[str] = None,
-        scenario: Optional[str] = None,
-        outbound_line: Optional[str] = None,
+        scenario_id: Optional[int] = None,
+        outbound_line_id: Optional[int] = None,
     ) -> None:
         payload = {
             "number_id": number_id,
@@ -175,8 +182,7 @@ class PanelClient:
         }
         if self.company:
             payload["company"] = self.company
-        if batch_id:
-            payload["batch_id"] = batch_id
+        # batch_id intentionally not sent; panel contract no longer includes it.
         if call_allowed is not None:
             payload["call_allowed"] = call_allowed
         if agent_id is not None:
@@ -185,10 +191,10 @@ class PanelClient:
             payload["agent_phone"] = agent_phone
         if user_message:
             payload["user_message"] = user_message
-        if scenario:
-            payload["scenario"] = scenario
-        if outbound_line:
-            payload["outbound_line"] = outbound_line
+        if scenario_id is not None:
+            payload["scenario_id"] = scenario_id
+        if outbound_line_id is not None:
+            payload["outbound_line_id"] = outbound_line_id
         try:
             resp = await self.client.post("/api/dialer/report-result", json=payload)
             resp.raise_for_status()
@@ -198,17 +204,17 @@ class PanelClient:
             async with self.lock:
                 self.pending_reports.append(payload)
 
-    async def register_scenarios(self, scenario_names: List[str]) -> None:
+    async def register_scenarios(self, scenarios: List[dict]) -> None:
         """Register available scenarios with the panel."""
-        if not scenario_names:
+        if not scenarios:
             return
-        payload = {"scenarios": scenario_names}
+        payload = {"scenarios": scenarios}
         if self.company:
             payload["company"] = self.company
         try:
             resp = await self.client.post("/api/dialer/register-scenarios", json=payload)
             resp.raise_for_status()
-            logger.info("Registered scenarios with panel: %s", scenario_names)
+            logger.info("Registered scenarios with panel: %s", scenarios)
         except Exception as exc:
             logger.warning("Failed to register scenarios with panel: %s", exc)
 
@@ -242,20 +248,24 @@ class PanelClient:
             return None
 
     @staticmethod
-    def _parse_active_scenarios(value) -> Optional[List[str]]:
+    def _parse_active_scenarios(value) -> Optional[List[PanelScenario]]:
         if value is None:
             return None
-        names: List[str] = []
+        scenarios: List[PanelScenario] = []
         for item in value or []:
             if isinstance(item, str):
                 name = item.strip()
+                if name:
+                    scenarios.append(PanelScenario(id=None, name=name, display_name=None))
             elif isinstance(item, dict):
                 name = str(item.get("name", "")).strip()
+                if name:
+                    scenario_id = item.get("id")
+                    display_name = item.get("display_name")
+                    scenarios.append(PanelScenario(id=scenario_id, name=name, display_name=display_name))
             else:
-                name = ""
-            if name:
-                names.append(name)
-        return names
+                continue
+        return scenarios
 
     @staticmethod
     def _parse_outbound_lines(value) -> List[PanelOutboundLine]:

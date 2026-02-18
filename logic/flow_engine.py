@@ -1052,7 +1052,6 @@ class FlowEngine(BaseScenario):
         phone_number = session.metadata.get("contact_number")
         if number_id is None and not phone_number:
             return
-        batch_id = session.metadata.get("batch_id")
         attempted_iso = session.metadata.get("attempted_at")
         attempted_at = datetime.utcnow().replace(tzinfo=timezone.utc)
         if attempted_iso:
@@ -1074,8 +1073,16 @@ class FlowEngine(BaseScenario):
                 return
             session.metadata["panel_last_status"] = status
 
-        scenario_name = session.metadata.get("scenario_name")
-        outbound_line = session.metadata.get("outbound_line")
+        scenario_id = session.metadata.get("scenario_id")
+        outbound_line_id = session.metadata.get("outbound_line_id")
+        try:
+            scenario_id_int = int(scenario_id) if scenario_id is not None else None
+        except (TypeError, ValueError):
+            scenario_id_int = None
+        try:
+            outbound_line_id_int = int(outbound_line_id) if outbound_line_id is not None else None
+        except (TypeError, ValueError):
+            outbound_line_id_int = None
 
         await self.panel_client.report_result(
             number_id=number_id,
@@ -1083,12 +1090,11 @@ class FlowEngine(BaseScenario):
             status=status,
             reason=reason,
             attempted_at=attempted_at,
-            batch_id=batch_id,
             agent_id=session.metadata.get("operator_agent_id"),
             agent_phone=session.metadata.get("operator_mobile"),
             user_message=user_message if status in {"UNKNOWN", "DISCONNECTED", "CONNECTED", "NOT_INTERESTED", "INBOUND_CALL"} else None,
-            scenario=scenario_name,
-            outbound_line=outbound_line,
+            scenario_id=scenario_id_int,
+            outbound_line_id=outbound_line_id_int,
         )
 
     def _map_result_to_panel(self, result: str, session: Session) -> tuple[str, str]:
