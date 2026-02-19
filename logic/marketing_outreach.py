@@ -66,7 +66,7 @@ class MarketingScenario(BaseScenario):
         }
         # Scenario-specific hotwords for STT
         if settings.scenario.transfer_to_operator:
-            # Agrad hotwords (same as before)
+            # Sina hotwords (same as before)
             self.stt_hotwords = [
                 "نه", "نیاز", "ندارم", "نمیخواهم", "نمیخوام", "ممنون", "ساعت", "زنگ",
                 "وقت", "خصوصی", "شماره", "پاک", "حذف", "کسی", "بفرستید",
@@ -252,7 +252,7 @@ class MarketingScenario(BaseScenario):
         elif prompt_key == "yes":
             # Scenario-specific behavior: transfer to operator or disconnect
             if self.settings.scenario.transfer_to_operator:
-                # Agrad scenario: connect to operator
+                # Sina scenario: connect to operator
                 await self._play_onhold(session)
                 # Small delay so "yes" finishes cleanly before ringing operator
                 await asyncio.sleep(0.5)
@@ -447,7 +447,7 @@ class MarketingScenario(BaseScenario):
             # Priority 3: Customer said YES
             elif intent_yes:
                 # For Salehi: always disconnected (we hang up, no operator)
-                # For Agrad: disconnected if operator didn't answer (operator_connected=False)
+                # For Sina: disconnected if operator didn't answer (operator_connected=False)
                 session.result = "disconnected"
 
             # Priority 4: Technical failures (preserve if already set)
@@ -708,7 +708,7 @@ class MarketingScenario(BaseScenario):
 
         # Scenario-specific positive/negative tokens
         if self.settings.scenario.transfer_to_operator:
-            # Agrad tokens (same as before)
+            # Sina tokens (same as before)
             yes_tokens = {
                 "بله", "آره", "اوکی", "در خدمتم", "بفرمایید", "تضمین چیه", "کجا هستید", "قیمتش چنده",
                 "سایت دارین", "نمونه تدریس", "آدرس کجاست", "ترمیکه", "اساتید کین",

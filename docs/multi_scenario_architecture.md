@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Salehi CallCenter project now supports **multiple call flow scenarios** running simultaneously through a single codebase. This architecture replaces the previous branch-based approach (salehi/agrad branches) with a dynamic, YAML-driven system that allows:
+The Salehi CallCenter project now supports **multiple call flow scenarios** running simultaneously through a single codebase. This architecture replaces the previous branch-based approach (salehi/sina branches) with a dynamic, YAML-driven system that allows:
 
 - **Multiple scenarios running in parallel**: Different call flows can be executed concurrently
 - **Round-robin scenario assignment**: Contacts are automatically distributed across active scenarios
@@ -33,7 +33,7 @@ scenario_name = registry.next_scenario()
 scenario_name = registry.next_inbound_scenario()
 
 # Update active scenarios from panel
-registry.set_enabled(["salehi_language", "agrad_marketing"])
+registry.set_enabled(["salehi_language", "sina_marketing"])
 ```
 
 ### 2. FlowEngine (`logic/flow_engine.py`)
@@ -275,7 +275,7 @@ GET /api/dialer/next-batch?size=10&company=salehi
       {"id": 2, "phone_number": "09987654321"}
     ]
   },
-  "active_scenarios": ["salehi_language", "agrad_marketing"],
+  "active_scenarios": ["salehi_language", "sina_marketing"],
   "inbound_agents": [
     {"id": 1, "phone_number": "09121111111"},
     {"id": 2, "phone_number": "09122222222"}
@@ -332,7 +332,7 @@ Content-Type: application/json
 
 {
   "company": "salehi",
-  "scenarios": ["salehi_language", "agrad_marketing"]
+  "scenarios": ["salehi_language", "sina_marketing"]
 }
 ```
 
@@ -344,7 +344,7 @@ Content-Type: application/json
 
 **Old (branch-based)**:
 ```bash
-SCENARIO=salehi  # or agrad
+SCENARIO=salehi  # or sina
 ```
 
 **New (multi-scenario)**:
@@ -368,14 +368,14 @@ MAX_CONCURRENT_OUTBOUND_CALLS=0
 
 ## Migration from Branch-Based Model
 
-### Before (Salehi/Agrad Branches)
+### Before (Salehi/Sina Branches)
 
 ```
 Repository
 ├── salehi (branch)
 │   └── logic/marketing_outreach.py  # Salehi-specific flow
-└── agrad (branch)
-    └── logic/marketing_outreach.py  # Agrad-specific flow
+└── sina (branch)
+    └── logic/marketing_outreach.py  # Sina-specific flow
 ```
 
 **Problems**:
@@ -390,7 +390,7 @@ Repository
 Repository (single main branch)
 ├── config/scenarios/
 │   ├── salehi_language.yaml
-│   └── agrad_marketing.yaml
+│   └── sina_marketing.yaml
 ├── logic/
 │   ├── flow_engine.py (generic interpreter)
 │   └── scenario_registry.py
@@ -547,7 +547,7 @@ tail -f logs/app.log | grep "Loaded scenario"
 Expected output:
 ```
 Loaded scenario 'salehi_language' from salehi_language.yaml (32 outbound steps, 13 inbound steps)
-Loaded scenario 'agrad_marketing' from agrad_marketing.yaml (30 outbound steps, 13 inbound steps)
+Loaded scenario 'sina_marketing' from sina_marketing.yaml (30 outbound steps, 13 inbound steps)
 Registered 2 scenarios with panel
 ```
 
@@ -559,7 +559,7 @@ tail -f logs/app.log | grep "Assigned scenario"
 Expected output (round-robin):
 ```
 Assigned scenario 'salehi_language' to contact 09123456789
-Assigned scenario 'agrad_marketing' to contact 09987654321
+Assigned scenario 'sina_marketing' to contact 09987654321
 Assigned scenario 'salehi_language' to contact 09111111111
 ```
 
@@ -584,7 +584,7 @@ Running inbound flow 'salehi_language' for session abc123
 curl -X POST http://panel.example.com/api/dialer/register-scenarios \
   -H "Authorization: Bearer $PANEL_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"company": "salehi", "scenarios": ["salehi_language", "agrad_marketing"]}'
+  -d '{"company": "salehi", "scenarios": ["salehi_language", "sina_marketing"]}'
 ```
 
 2. Test batch fetch:
@@ -596,7 +596,7 @@ curl "http://panel.example.com/api/dialer/next-batch?size=10&company=salehi" \
 Expected response should include:
 ```json
 {
-  "active_scenarios": ["salehi_language", "agrad_marketing"],
+  "active_scenarios": ["salehi_language", "sina_marketing"],
   "inbound_agents": [...],
   "outbound_agents": [...]
 }

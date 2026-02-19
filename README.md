@@ -7,11 +7,11 @@ Outbound/inbound ARI-driven call-control engine with YAML-based scenario flows a
 - Bridge-centric ARI control (Asterisk 20 / FreePBX 17).
 - Outbound dialer with per-line limits (concurrent/per-minute/per-day) and least-load line selection. Active lines come from panel `next-batch.outbound_lines`; env `OUTBOUND_NUMBERS` is used for startup line registration/default bootstrap.
 - **Salehi scenario**: Language academy marketing with course-specific vocabulary (hello → alo → record → classify yes/no/number_question; yes plays `yes` then disconnects successfully; no/unknown plays `goodby`; number_question plays `number` then one more capture). Result reported as CONNECTED when user says yes.
-- **Agrad scenario**: General marketing with operator transfer (hello → alo → record → classify yes/no/number_question; yes plays `yes` + `onhold` then bridges operator; no/unknown plays `goodby`; number_question not used). Result reported as CONNECTED when operator answers.
+- **Sina scenario**: General marketing with operator transfer (hello → alo → record → classify yes/no/number_question; yes plays `yes` + `onhold` then bridges operator; no/unknown plays `goodby`; number_question not used). Result reported as CONNECTED when operator answers.
 - Inbound calls follow the same flow and are reported to the panel by phone when `number_id` is absent.
-- Operator leg presents the customer's number as caller ID (fallback to `OPERATOR_CALLER_ID`) - Agrad only.
+- Operator leg presents the customer's number as caller ID (fallback to `OPERATOR_CALLER_ID`) - Sina only.
 - STT via Vira with ffmpeg pre-processing (denoise/normalize). Enhanced copies are saved under `/var/spool/asterisk/recording/enhanced/` for review. Positive/negative transcripts are logged (`logs/positive_stt.log`, `logs/negative_stt.log`). Empty/very short audio (<0.1s, RMS <0.001, or bytes <800) is treated as caller hangup and skipped.
-- Optional GapGPT (gpt-4o-mini) for intent classification with scenario-specific guided examples (Salehi uses course/language names; Agrad uses general responses).
+- Optional GapGPT (gpt-4o-mini) for intent classification with scenario-specific guided examples (Salehi uses course/language names; Sina uses general responses).
 - In-memory session manager ready for future Redis-backed storage.
 - Async/await architecture (httpx + websockets) with semaphore-guarded STT/TTS/LLM calls and HTTP connection pooling. Origination throttle: 3 calls/sec; optional global inbound/outbound caps; per-line concurrency (`MAX_CONCURRENT_CALLS`) is shared across inbound+outbound on each line with inbound priority (outbound pauses while inbound is waiting). Vira STT quota (403) and LLM quota errors mark failures that pause the dialer and notify panel/SMS once thresholds are hit.
 
@@ -23,7 +23,7 @@ Outbound/inbound ARI-driven call-control engine with YAML-based scenario flows a
 5. Copy `.env.example` to `.env` and fill in ARI, trunk, tokens, and either panel creds or `STATIC_CONTACTS` for local testing (set `PANEL_*` empty to disable panel).
 6. Set company/scenario source: configure `COMPANY` and `SCENARIOS_DIR` in `.env`.
 7. Ensure ARI dialplan sends calls to `Stasis(salehi)` and ARI user is configured.
-8. Prompts live in-repo under `assets/audio/<scenario>/src/` (mp3 sources). To install them on Asterisk run (with the right permissions) `bash scripts/sync_audio.sh` which converts mp3→wav and copies to `/var/lib/asterisk/sounds/custom/` as `hello`, `alo`, `goodby`, `yes`, `number` (Salehi), `onhold` (Agrad) - override target with `AST_SOUND_DIR`.
+8. Prompts live in-repo under `assets/audio/<scenario>/src/` (mp3 sources). To install them on Asterisk run (with the right permissions) `bash scripts/sync_audio.sh` which converts mp3→wav and copies to `/var/lib/asterisk/sounds/custom/` as `hello`, `alo`, `goodby`, `yes`, `number` (Salehi), `onhold` (Sina) - override target with `AST_SOUND_DIR`.
 9. Run: `python main.py` (async entrypoint; startup auto-converts mp3→wav and syncs prompts to Asterisk).
 
 **Note**: Ensure `AST_SOUND_DIR` points to your actual Asterisk custom sounds path (e.g., `/var/lib/asterisk/sounds/custom` or `/var/lib/asterisk/sounds/en/custom`). The app will try to sync to both base and `en/custom` when possible. If permissions block copying, run as a user with rights or pre-create the directories.
@@ -37,7 +37,7 @@ Set via environment or `.env`:
 - Panel: `PANEL_BASE_URL`, `PANEL_API_TOKEN` (leave empty to disable panel). Panel `call_allowed=false` pauses new outbound; existing calls finish. Inbound results are reported by phone when `number_id` is missing.
 - LLM: `GAPGPT_BASE_URL`, `GAPGPT_API_KEY` (optional; uses gpt-4o-mini). If LLM quota exceeded (403 error), dialer pauses and SMS/panel alerts are sent.
 - Vira: `VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`, `VIRA_STT_URL`, `VIRA_TTS_URL`. If STT quota exceeded (403 error), dialer pauses and SMS/panel alerts are sent.
-- Operator bridge (Agrad only): `OPERATOR_EXTENSION`, `OPERATOR_TRUNK`, `OPERATOR_CALLER_ID`, `OPERATOR_TIMEOUT`
+- Operator bridge (Sina only): `OPERATOR_EXTENSION`, `OPERATOR_TRUNK`, `OPERATOR_CALLER_ID`, `OPERATOR_TIMEOUT`
 - Concurrency/timeouts: `HTTP_MAX_CONNECTIONS`, `HTTP_TIMEOUT`, `ARI_TIMEOUT`, `STT_TIMEOUT`, `TTS_TIMEOUT`, `LLM_TIMEOUT`, `MAX_PARALLEL_STT`, `MAX_PARALLEL_TTS`, `MAX_PARALLEL_LLM`
 - Global caps (optional; 0 disables): `MAX_CONCURRENT_OUTBOUND_CALLS`, `MAX_CONCURRENT_INBOUND_CALLS`. Per-line caps: `MAX_CONCURRENT_CALLS` (shared inbound+outbound per line), `MAX_CALLS_PER_MINUTE`, `MAX_CALLS_PER_DAY`. Origination throttle: configurable via `MAX_ORIGINATIONS_PER_SECOND`.
 - SMS alerts: `SMS_API_KEY`, `SMS_FROM`, `SMS_ADMINS`, `FAIL_ALERT_THRESHOLD` (pauses dialer and notifies after consecutive failures)
@@ -77,7 +77,7 @@ Set via environment or `.env`:
 7. If caller asks "شماره منو از کجا آوردید" (number_question): play `number` response, then record one more reply; **yes** → play `yes` then disconnect as success, **no/unknown** → play `goodby`.
 8. When call ends, results are reported to panel (if configured) via `report_result`.
 
-### Agrad Scenario (General Marketing with Operator Transfer)
+### Sina Scenario (General Marketing with Operator Transfer)
 1. Dialer pulls numbers from panel batches when allowed (or `STATIC_CONTACTS` fallback when panel disabled) and originates via `PJSIP/<dialstring>@<OUTBOUND_TRUNK>` where dialstring = last 4 digits of the chosen line + customer digits; per-line limits and least-load selection apply.
 2. On answer, play `hello` greeting.
 3. Play `alo` acknowledgment.
@@ -95,7 +95,7 @@ Internal results are mapped to standardized panel statuses when reporting. See [
 **Success:**
 - `connected_to_operator` → Panel status: **CONNECTED**
   - **Salehi**: User said yes, `yes` prompt played, call disconnected (no operator transfer)
-  - **Agrad**: User said yes, operator answered and was connected
+  - **Sina**: User said yes, operator answered and was connected
 
 **User Declined:**
 - `not_interested` → Panel status: **NOT_INTERESTED**
@@ -110,12 +110,12 @@ Internal results are mapped to standardized panel statuses when reporting. See [
 - `missed` → Panel status: **MISSED**
   - No answer, busy signal, or timeout watchdog triggered
 
-**Disconnect Before Operator (Agrad only):**
+**Disconnect Before Operator (Sina only):**
 - `disconnected` → Panel status: **DISCONNECTED**
   - User said yes but hung up before operator answered
 
 **Technical Failures:**
-- `failed:operator_failed` → Panel status: **FAILED** (Agrad only)
+- `failed:operator_failed` → Panel status: **FAILED** (Sina only)
   - Operator leg failed to connect
 - `failed:stt_failure` → Panel status: **NOT_INTERESTED**
   - STT transcription failed (treated as non-response)
@@ -170,7 +170,7 @@ Use `update.sh` for deployment:
 
 **Call flow issues:**
 - Confirm ARI credentials and app name; WebSocket URL must be reachable from the app host.
-- Ensure custom sound files exist and are readable by Asterisk at `/var/lib/asterisk/sounds/custom/` (should contain `hello.wav`, `alo.wav`, `goodby.wav`, `yes.wav`, and for Salehi: `number.wav`, for Agrad: `onhold.wav`).
+- Ensure custom sound files exist and are readable by Asterisk at `/var/lib/asterisk/sounds/custom/` (should contain `hello.wav`, `alo.wav`, `goodby.wav`, `yes.wav`, and for Salehi: `number.wav`, for Sina: `onhold.wav`).
 - If Vira tokens are missing, STT will return empty text and the call will follow the no-response path.
 
 **Quota errors (Vira STT or GapGPT LLM):**

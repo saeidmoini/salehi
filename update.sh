@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Deployment script for Salehi CallCenter
-# Supports both Salehi and Agrad scenarios via SCENARIO environment variable
+# Supports both Salehi and Sina scenarios via SCENARIO environment variable
 # Usage: ./update.sh
-#        SCENARIO=agrad ./update.sh
+#        SCENARIO=sina ./update.sh
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 

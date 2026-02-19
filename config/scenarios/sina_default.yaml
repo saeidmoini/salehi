@@ -1,7 +1,7 @@
 scenario:
   name: default
   display_name: "Sina Marketing Campaign"
-  company: asinad
+  company: sina
 
   prompts:
     hello: "sound:custom/hello"
@@ -198,18 +198,12 @@ scenario:
     - step: handle_yes
       type: play_prompt
       prompt: yes
-      next: transfer_operator
-
-    - step: transfer_operator
-      type: transfer_to_operator
-      agent_type: outbound
-      on_success: result_connected
-      on_failure: result_disconnected
+      next: result_connected
 
     - step: result_connected
       type: set_result
-      result: connected_to_operator
-      next: wait_hangup
+      result: disconnected
+      next: do_disconnect
 
     - step: result_disconnected
       type: set_result

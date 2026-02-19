@@ -324,7 +324,7 @@ class TestInboundDirectNoAgents:
 
 
 class TestInboundDirectBothScenarios:
-    """Inbound-direct should work the same for both salehi and agrad scenarios."""
+    """Inbound-direct should work the same for both salehi and sina scenarios."""
 
     @pytest.mark.asyncio
     async def test_salehi_scenario(self):
@@ -338,8 +338,8 @@ class TestInboundDirectBothScenarios:
         scenario.ari_client.originate_call.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_agrad_scenario(self):
-        settings = _make_settings(scenario_name="agrad", transfer_to_operator=True)
+    async def test_sina_scenario(self):
+        settings = _make_settings(scenario_name="sina", transfer_to_operator=True)
         scenario = _build_scenario(settings=settings)
         session = _make_session()
 

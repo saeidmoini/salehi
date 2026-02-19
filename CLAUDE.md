@@ -6,7 +6,7 @@
 
 **Technology Stack**: Python 3.12, Asyncio, Asterisk 20/FreePBX 17, httpx, websockets
 
-**Scenario Support**: The project supports multiple call flow scenarios (Salehi and Agrad) through a single codebase. Switch scenarios using the `SCENARIO` environment variable. See [Scenario Management Guide](docs/scenario_management.md) for details.
+**Scenario Support**: The project supports multiple call flow scenarios (Salehi and Sina) through a single codebase. Switch scenarios using the `SCENARIO` environment variable. See [Scenario Management Guide](docs/scenario_management.md) for details.
 
 ---
 
@@ -502,8 +502,8 @@ The system maps call outcomes to these standardized codes:
 
 | Code | Description |
 |------|-------------|
-| `connected_to_operator` | Customer said yes - Agrad: operator answered; Salehi: successful interest |
-| `disconnected` | Customer hung up during call flow or operator unavailable (Agrad) |
+| `connected_to_operator` | Customer said yes - Sina: operator answered; Salehi: successful interest |
+| `disconnected` | Customer hung up during call flow or operator unavailable (Sina) |
 | `not_interested` | Customer said no |
 | `hangup` | Customer hung up before response |
 | `missed` | No answer / busy / timeout |
@@ -568,7 +568,7 @@ async def connect_to_operator(session: Session)  # Disabled on Salehi
 - No operator transfer
 - System waits for audio to finish before disconnecting
 
-**Agrad Branch**:
+**Sina Branch**:
 - YES intent → Play "yes" → Wait for PlaybackFinished → Play "onhold" → Connect to operator
 - Result: `connected_to_operator` (if operator answers) or `disconnected` (if operator unavailable)
 - Round-robin agent selection
@@ -818,7 +818,7 @@ bash scripts/sync_audio.sh
 # Determines which call flow to use
 # Options:
 #   - salehi: On YES intent, play "yes" prompt then disconnect (no operator transfer)
-#   - agrad: On YES intent, play "yes" + "onhold" then connect to operator
+#   - sina: On YES intent, play "yes" + "onhold" then connect to operator
 SCENARIO=salehi
 ```
 
@@ -963,7 +963,7 @@ exten => _X.,1,Stasis(salehi)
 
 **Feature**: Inbound calls now skip the marketing scenario entirely and are directly connected to an available agent's mobile phone.
 
-**Behavior** (both Salehi and Agrad scenarios):
+**Behavior** (both Salehi and Sina scenarios):
 - Inbound call arrives → auto-answered → hold music plays → system selects first available agent (round-robin) → originates call to agent's mobile → bridges customer with agent
 - No hello prompt, no recording, no STT, no LLM classification
 - Agent mobiles come from panel (`active_agents`) or `OPERATOR_MOBILE_NUMBERS` config
@@ -1002,7 +1002,7 @@ Inbound call → StasisStart → _accept_inbound() → answer
 **Problem**: System was disconnecting calls before audio prompts finished playing.
 - Used hardcoded `asyncio.sleep(2)` delay instead of waiting for actual playback completion
 - Resulted in customers hearing partial prompts before being disconnected
-- In Agrad scenario: operators would answer to empty lines (customer already gone)
+- In Sina scenario: operators would answer to empty lines (customer already gone)
 
 **Solution**: Implemented event-driven playback completion handling.
 - Removed manual delays from `_handle_yes()` and other handlers
@@ -1141,7 +1141,7 @@ sudo journalctl -u salehi -f
 **Automated Deployment** ([update.sh](update.sh)):
 
 ```bash
-# Detects current branch (salehi/agrad)
+# Detects current branch (salehi/sina)
 # Pulls latest code
 # Updates dependencies
 # Sets permissions
@@ -1324,7 +1324,7 @@ MAX_PARALLEL_LLM=20  # Increase LLM concurrency
    To:
    ```python
    if intent == "yes":
-       # Agrad behavior
+       # Sina behavior
        await self.play_prompt(session, "sound:custom/yes")
        await self.play_prompt(session, "sound:custom/onhold")
        success = await self.connect_to_operator(session)
@@ -1903,7 +1903,7 @@ To disable inbound priority, modify [logic/dialer.py](logic/dialer.py) and remov
 3. Ensure disk space is sufficient
 4. Comply with recording notification laws in your jurisdiction
 
-### Q: How do I migrate from Salehi to Agrad branch?
+### Q: How do I migrate from Salehi to Sina branch?
 
 **A**: To switch branches:
 
@@ -1913,7 +1913,7 @@ git add .
 git commit -m "Local changes"
 
 # 2. Switch branch
-git checkout agrad
+git checkout sina
 
 # 3. Update dependencies
 source venv/bin/activate
@@ -1928,7 +1928,7 @@ bash scripts/sync_audio.sh
 sudo systemctl restart salehi
 ```
 
-**Note**: Agrad branch has different call flow (operator transfer enabled).
+**Note**: Sina branch has different call flow (operator transfer enabled).
 
 ---
 
@@ -1938,7 +1938,7 @@ sudo systemctl restart salehi
 
 - [README.md](README.md): User-facing documentation and quick start
 - [agent.md](agent.md): Developer notes and working rules
-- [docs/scenario_management.md](docs/scenario_management.md): **Scenario management guide** (Salehi vs Agrad, migration from branches)
+- [docs/scenario_management.md](docs/scenario_management.md): **Scenario management guide** (Salehi vs Sina, migration from branches)
 - [docs/branching.md](docs/branching.md): Deployment strategy and branch model
 - [docs/llm_vira_usage.md](docs/llm_vira_usage.md): LLM and Vira API integration guide
 

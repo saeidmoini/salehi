@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Salehi CallCenter project now supports **multiple call flow scenarios** through a single codebase. Instead of maintaining separate branches for different scenarios (Salehi and Agrad), you can switch between scenarios using a simple environment variable.
+The Salehi CallCenter project now supports **multiple call flow scenarios** through a single codebase. Instead of maintaining separate branches for different scenarios (Salehi and Sina), you can switch between scenarios using a simple environment variable.
 
 ## Benefits of This Approach
 
@@ -31,9 +31,9 @@ The Salehi CallCenter project now supports **multiple call flow scenarios** thro
 
 ---
 
-### Agrad Scenario
+### Sina Scenario
 
-**Configuration**: `SCENARIO=agrad`
+**Configuration**: `SCENARIO=sina`
 
 **Behavior**:
 - Flow: hello → alo → record → classify intent
@@ -56,7 +56,7 @@ Add this to your `.env` file:
 
 ```bash
 # Scenario configuration
-# Options: salehi, agrad
+# Options: salehi, sina
 SCENARIO=salehi
 ```
 
@@ -71,9 +71,9 @@ The `SCENARIO` environment variable controls multiple aspects of the system:
   - LLM examples: Language course names and languages for intent classification
   - Number question prompt enabled
 
-- `SCENARIO=agrad`:
+- `SCENARIO=sina`:
   - `transfer_to_operator = True`
-  - Audio files loaded from `assets/audio/agrad/src/`
+  - Audio files loaded from `assets/audio/sina/src/`
   - STT hotwords: General response vocabulary
   - LLM examples: General yes/no responses
   - Number question NOT used
@@ -97,12 +97,12 @@ PANEL_BASE_URL=https://panel-salehi.example.com
 # ... other settings
 ```
 
-**Server 2 (Agrad)**:
+**Server 2 (Sina)**:
 ```bash
 # .env
-SCENARIO=agrad
+SCENARIO=sina
 OUTBOUND_NUMBERS=02191302955
-PANEL_BASE_URL=https://panel-agrad.example.com
+PANEL_BASE_URL=https://panel-sina.example.com
 OPERATOR_MOBILE_NUMBERS=09121111111,09122222222
 # ... other settings
 ```
@@ -111,7 +111,7 @@ OPERATOR_MOBILE_NUMBERS=09121111111,09122222222
 1. Push changes to main branch
 2. On each server: `./update.sh` (auto-detects scenario from `.env`)
 3. Each server runs the scenario configured in its `.env`
-4. Services are named by scenario: `salehi.service` or `agrad.service`
+4. Services are named by scenario: `salehi.service` or `sina.service`
 
 ---
 
@@ -122,12 +122,12 @@ If you need to switch scenarios on the same server:
 ```bash
 # Edit .env
 nano .env
-# Change: SCENARIO=salehi to SCENARIO=agrad
+# Change: SCENARIO=salehi to SCENARIO=sina
 
 # Restart appropriate service (service name matches scenario)
 sudo systemctl restart salehi.service  # If switching from salehi
 # OR
-sudo systemctl restart agrad.service   # If switching to agrad
+sudo systemctl restart sina.service   # If switching to sina
 
 # Note: You may need to update service file name/config when switching scenarios
 ```
@@ -140,8 +140,8 @@ sudo systemctl restart agrad.service   # If switching to agrad
 # Test Salehi scenario
 SCENARIO=salehi python main.py
 
-# Test Agrad scenario (in another terminal)
-SCENARIO=agrad python main.py
+# Test Sina scenario (in another terminal)
+SCENARIO=sina python main.py
 ```
 
 ---
@@ -151,7 +151,7 @@ SCENARIO=agrad python main.py
 ### Old Approach (Separate Branches)
 
 **Problems**:
-- Had to maintain code in both `salehi` and `agrad` branches
+- Had to maintain code in both `salehi` and `sina` branches
 - Merge conflicts when syncing changes
 - Bugfixes needed to be applied twice
 - Features added to one branch might not make it to the other
@@ -166,11 +166,11 @@ git branch salehi:
   - STT/LLM: Language course vocabulary
   - Deployment config for Salehi environment
 
-git branch agrad:
+git branch sina:
   - Marketing scenario: transfer to operator on YES
   - Audio files: assets/audio/src/ (general prompts - DIFFERENT CONTENT!)
   - STT/LLM: General vocabulary
-  - Deployment config for Agrad environment
+  - Deployment config for Sina environment
 ```
 
 ---
@@ -191,11 +191,11 @@ git branch main:
   - Marketing scenario: checks settings.scenario.transfer_to_operator
   - Audio files separated by scenario:
     - assets/audio/salehi/src/ (course-specific prompts)
-    - assets/audio/agrad/src/ (general prompts)
+    - assets/audio/sina/src/ (general prompts)
   - STT hotwords: scenario-specific in code (line 67-122)
   - LLM examples: scenario-specific in code (line 611-673)
   - Config-driven deployment (.env with SCENARIO variable)
-  - Service naming: Dynamic based on scenario (salehi.service or agrad.service)
+  - Service naming: Dynamic based on scenario (salehi.service or sina.service)
 ```
 
 ---
@@ -207,7 +207,7 @@ git branch main:
 **Use the migration script for production servers:**
 
 ```bash
-# From your current branch (salehi or agrad)
+# From your current branch (salehi or sina)
 bash migrate_to_main.sh
 ```
 
@@ -226,7 +226,7 @@ bash migrate_to_main.sh
 ./update.sh
 
 # Restart service (script shows correct command)
-sudo systemctl restart salehi.service  # or agrad.service
+sudo systemctl restart salehi.service  # or sina.service
 ```
 
 ---
@@ -251,10 +251,10 @@ sudo systemctl restart salehi.service  # or agrad.service
 SCENARIO=salehi
 ```
 
-**On Agrad Server**:
+**On Sina Server**:
 ```bash
 # Add to .env
-SCENARIO=agrad
+SCENARIO=sina
 OPERATOR_MOBILE_NUMBERS=09121111111,09122222222
 ```
 
@@ -267,7 +267,7 @@ python main.py
 # Check logs for:
 # "MarketingScenario initialized with scenario=salehi (transfer_to_operator=False)"
 # or
-# "MarketingScenario initialized with scenario=agrad (transfer_to_operator=True)"
+# "MarketingScenario initialized with scenario=sina (transfer_to_operator=True)"
 ```
 
 ### Step 4: Deploy
@@ -281,7 +281,7 @@ python main.py
 # - Pull from main branch
 # - Update dependencies
 # - Sync audio files from assets/audio/<scenario>/src/
-# - Restart correct service (salehi.service or agrad.service)
+# - Restart correct service (salehi.service or sina.service)
 ```
 
 ### Step 5: Verify Migration
@@ -293,10 +293,10 @@ tail -f logs/app.log | grep "MarketingScenario initialized"
 # Should see:
 # "MarketingScenario initialized with scenario=salehi (transfer_to_operator=False)"
 # OR
-# "MarketingScenario initialized with scenario=agrad (transfer_to_operator=True)"
+# "MarketingScenario initialized with scenario=sina (transfer_to_operator=True)"
 
 # Verify audio files
-ls -lh assets/audio/salehi/src/  # Or agrad
+ls -lh assets/audio/salehi/src/  # Or sina
 ls -lh /var/lib/asterisk/sounds/custom/
 
 # Test a call and verify correct flow
@@ -307,9 +307,9 @@ ls -lh /var/lib/asterisk/sounds/custom/
 ```bash
 # Once confirmed working on all servers, you can archive old branches
 git tag archive/salehi salehi
-git tag archive/agrad agrad
-git branch -d salehi agrad
-git push origin :salehi :agrad  # Delete remote branches (if desired)
+git tag archive/sina sina
+git branch -d salehi sina
+git push origin :salehi :sina  # Delete remote branches (if desired)
 ```
 
 ---
@@ -331,7 +331,7 @@ if scenario_name == "custom":
     transfer_to_operator = False
     # Add other custom flags here
 else:
-    transfer_to_operator = (scenario_name == "agrad")
+    transfer_to_operator = (scenario_name == "sina")
 
 scenario = ScenarioSettings(
     name=scenario_name,
@@ -348,7 +348,7 @@ elif prompt_key == "yes":
         await self._play_prompt(session, "custom_prompt")
         # ... custom flow
     elif self.settings.scenario.transfer_to_operator:
-        # Agrad scenario
+        # Sina scenario
         await self._play_onhold(session)
         await asyncio.sleep(0.5)
         await self._connect_to_operator(session)
@@ -365,7 +365,7 @@ elif prompt_key == "yes":
 if settings.scenario.name == "custom":
     self.stt_hotwords = ["custom", "vocab", "words"]
 else:
-    # Existing salehi/agrad logic
+    # Existing salehi/sina logic
     ...
 ```
 
@@ -408,9 +408,9 @@ class ScenarioSettings:
 # In get_settings():
 scenario = ScenarioSettings(
     name=scenario_name,
-    transfer_to_operator=(scenario_name == "agrad"),
+    transfer_to_operator=(scenario_name == "sina"),
     use_sms_confirmation=(scenario_name == "salehi"),
-    max_retries=3 if scenario_name == "agrad" else 1,
+    max_retries=3 if scenario_name == "sina" else 1,
 )
 ```
 
@@ -433,7 +433,7 @@ grep "MarketingScenario initialized" logs/app.log
 ```bash
 # Update .env
 nano .env
-# Set: SCENARIO=salehi (or agrad)
+# Set: SCENARIO=salehi (or sina)
 
 # Restart
 sudo systemctl restart salehi
@@ -441,7 +441,7 @@ sudo systemctl restart salehi
 
 ---
 
-### Issue: Operator transfer not working (Agrad scenario)
+### Issue: Operator transfer not working (Sina scenario)
 
 **Check**:
 ```bash
@@ -457,8 +457,8 @@ grep "operator" logs/app.log -i
 
 **Fix**:
 ```bash
-# Ensure SCENARIO=agrad
-SCENARIO=agrad
+# Ensure SCENARIO=sina
+SCENARIO=sina
 
 # Ensure operator mobiles are set
 OPERATOR_MOBILE_NUMBERS=09121111111,09122222222
@@ -477,7 +477,7 @@ USE_PANEL_AGENTS=true
 
 **Fix**:
 ```bash
-# Verify SCENARIO value (must be exactly "salehi" or "agrad")
+# Verify SCENARIO value (must be exactly "salehi" or "sina")
 grep SCENARIO .env
 
 # Restart service
@@ -498,7 +498,7 @@ Don't commit `.env` files, but do maintain templates:
 ```bash
 # Create scenario-specific templates
 cp .env .env.salehi.template
-cp .env .env.agrad.template
+cp .env .env.sina.template
 
 # Add to .gitignore
 echo ".env" >> .gitignore
@@ -518,7 +518,7 @@ SCENARIO=salehi python main.py &
 # Kill
 kill %1
 
-SCENARIO=agrad python main.py &
+SCENARIO=sina python main.py &
 # Make a test call, verify operator transfer
 ```
 
@@ -542,7 +542,7 @@ if self.settings.enable_voicemail:
 
 Keep a table of what differs between scenarios:
 
-| Feature | Salehi | Agrad |
+| Feature | Salehi | Sina |
 |---------|--------|-------|
 | Operator Transfer (Outbound) | ❌ No | ✅ Yes |
 | Inbound Handling | ✅ Direct to agent | ✅ Direct to agent |
@@ -552,10 +552,10 @@ Keep a table of what differs between scenarios:
 | "Number" Prompt | ✅ Yes (for "where did you get my number") | ❌ No |
 | Result for YES | `connected_to_operator` | `connected_to_operator` |
 | Panel Status for YES | CONNECTED | CONNECTED |
-| Audio Directory | `assets/audio/salehi/src/` | `assets/audio/agrad/src/` |
+| Audio Directory | `assets/audio/salehi/src/` | `assets/audio/sina/src/` |
 | STT Hotwords | Course/language names | General vocabulary |
 | LLM Examples | Language courses, languages | General yes/no |
-| Service Name | `salehi.service` | `agrad.service` |
+| Service Name | `salehi.service` | `sina.service` |
 | Panel Integration | ✅ Yes | ✅ Yes |
 
 ### 5. Monitor Scenario in Production
@@ -581,7 +581,7 @@ tail -f logs/app.log | grep "MarketingScenario initialized"
 ## Summary
 
 ✅ **No more separate branches** - one codebase, multiple scenarios
-✅ **Simple configuration** - just `SCENARIO=salehi` or `SCENARIO=agrad`
+✅ **Simple configuration** - just `SCENARIO=salehi` or `SCENARIO=sina`
 ✅ **Easy to extend** - add new scenarios or flags as needed
 ✅ **Testable** - test both scenarios locally before deployment
 ✅ **Maintainable** - shared features update both scenarios automatically
