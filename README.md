@@ -110,9 +110,10 @@ Internal results are mapped to standardized panel statuses when reporting. See [
 - `missed` → Panel status: **MISSED**
   - No answer, busy signal, or timeout watchdog triggered
 
-**Disconnect Before Operator (Sina only):**
+**Disconnect Before Operator (Sina outbound):**
 - `disconnected` → Panel status: **DISCONNECTED**
-  - User said yes but hung up before operator answered
+  - User said yes but hung up before operator answered (outbound flow)
+  - Note: for inbound-direct calls, internal `disconnected` is reported as **INBOUND_CALL**
 
 **Technical Failures:**
 - `failed:operator_failed` → Panel status: **FAILED** (Sina only)

@@ -554,7 +554,7 @@ class Dialer:
             logger.info("Panel disallowed calls; retry in %ss reason=%s", retry, batch.reason)
             return
 
-        self.next_panel_poll = now + timedelta(seconds=60)
+        self.next_panel_poll = now + timedelta(seconds=self.settings.dialer.default_retry)
         if batch.numbers:
             await self._queue_panel_numbers(batch.numbers, batch.batch_id)
 
