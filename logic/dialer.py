@@ -435,7 +435,8 @@ class Dialer:
     ) -> None:
         self.paused_by_failures = True
         self.paused_reason = "consecutive_failures"
-        msg = f"Dialer paused after {self.failure_streak} consecutive FAILURES. Last result={result}"
+        company = (self.settings.company or "unknown").strip()
+        msg = f"{company} : Dialer paused after {self.failure_streak} consecutive FAILURES. Last result={result}"
         logger.error(msg)
         if self.sms_client:
             try:
