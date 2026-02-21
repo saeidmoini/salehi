@@ -535,6 +535,36 @@ class FlowEngine(BaseScenario):
         scenario = self._get_scenario(session)
         await self._play_prompt(session, "onhold", scenario)
 
+    async def _start_processing_playback(
+        self,
+        session: Session,
+        prompt_key: str,
+        scenario: Optional[ScenarioConfig] = None,
+    ) -> Optional[str]:
+        async with session.lock:
+            existing = session.metadata.get("processing_playback_id")
+            if existing:
+                return existing
+        playback_id = await self._play_prompt(
+            session,
+            prompt_key,
+            scenario,
+            track_for_flow=False,
+        )
+        if playback_id:
+            async with session.lock:
+                session.metadata["processing_playback_id"] = playback_id
+        return playback_id
+
+    async def _stop_processing_playback(self, session: Session) -> None:
+        async with session.lock:
+            playback_id = session.metadata.pop("processing_playback_id", None)
+        if playback_id:
+            try:
+                await self.ari_client.stop_playback(playback_id)
+            except Exception:
+                pass
+
     async def _stop_onhold_playbacks(self, session: Session) -> None:
         async with session.lock:
             hold_playbacks = [pb_id for pb_id, key in session.playbacks.items() if key == "onhold"]
@@ -590,10 +620,18 @@ class FlowEngine(BaseScenario):
         scenario = self._get_scenario(session)
         if not scenario:
             return
+        processing_prompt = None
+        if next_step_id:
+            next_step = scenario.get_step(next_step_id, inbound=inbound)
+            if next_step and next_step.type == "classify_intent" and next_step.prompt:
+                processing_prompt = next_step.prompt
+        if processing_prompt:
+            await self._start_processing_playback(session, processing_prompt, scenario)
         try:
             audio_bytes = await self.ari_client.fetch_stored_recording(recording_name)
             if self._is_empty_audio(audio_bytes):
                 logger.info("Recording empty for session %s", session.session_id)
+                await self._stop_processing_playback(session)
                 if on_empty_id:
                     step = scenario.get_step(on_empty_id, inbound=inbound)
                     if step:
@@ -610,6 +648,7 @@ class FlowEngine(BaseScenario):
             logger.info("STT (%s) session %s: %s", phase, session.session_id, transcript)
 
             if not transcript:
+                await self._stop_processing_playback(session)
                 if on_empty_id:
                     step = scenario.get_step(on_empty_id, inbound=inbound)
                     if step:
@@ -629,6 +668,7 @@ class FlowEngine(BaseScenario):
 
         except Exception as exc:
             logger.exception("Transcription failed for session %s: %s", session.session_id, exc)
+            await self._stop_processing_playback(session)
             msg = str(exc)
             # Vira balance error
             if "403" in msg or "balanceError" in msg or "credit is below the set threshold" in msg:
@@ -645,24 +685,16 @@ class FlowEngine(BaseScenario):
 
     async def _classify_intent_step(self, session: Session, step, scenario: ScenarioConfig, inbound: bool) -> None:
         """Classify the last transcript using LLM, store intent."""
-        processing_playback_id = None
-        if step.prompt:
-            # Optional "processing" voice while LLM intent classification runs.
-            processing_playback_id = await self._play_prompt(
-                session,
-                step.prompt,
-                scenario,
-                track_for_flow=False,
-            )
+        async with session.lock:
+            processing_playback_id = session.metadata.get("processing_playback_id")
+        if not processing_playback_id and step.prompt:
+            # Fallback: if not already started after recording, start now.
+            processing_playback_id = await self._start_processing_playback(session, step.prompt, scenario)
 
         async with session.lock:
             transcript = session.metadata.get("last_transcript", "")
         if not transcript:
-            if processing_playback_id:
-                try:
-                    await self.ari_client.stop_playback(processing_playback_id)
-                except Exception:
-                    pass
+            await self._stop_processing_playback(session)
             if step.on_failure:
                 fail_step = scenario.get_step(step.on_failure, inbound=inbound)
                 if fail_step:
@@ -694,11 +726,7 @@ class FlowEngine(BaseScenario):
         else:
             self.unknown_logger.info("session=%s intent=%s transcript=%s", session.session_id, intent, transcript)
 
-        if processing_playback_id:
-            try:
-                await self.ari_client.stop_playback(processing_playback_id)
-            except Exception:
-                pass
+        await self._stop_processing_playback(session)
 
         if step.next:
             next_step = scenario.get_step(step.next, inbound=inbound)

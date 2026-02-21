@@ -18,6 +18,12 @@ def _parse_flow_steps(raw_steps: list) -> List[FlowStep]:
     """Parse a list of raw YAML dicts into FlowStep objects."""
     steps = []
     for raw in raw_steps:
+        raw_prompt = raw.get("prompt")
+        prompt = raw_prompt
+        if isinstance(raw_prompt, bool):
+            # YAML can coerce unquoted yes/no values to booleans.
+            prompt = "yes" if raw_prompt else "no"
+
         raw_routes = raw.get("routes")
         routes = None
         if isinstance(raw_routes, dict):
@@ -33,7 +39,7 @@ def _parse_flow_steps(raw_steps: list) -> List[FlowStep]:
             step=raw["step"],
             type=raw["type"],
             next=raw.get("next"),
-            prompt=raw.get("prompt"),
+            prompt=prompt,
             on_empty=raw.get("on_empty"),
             on_failure=raw.get("on_failure"),
             routes=routes,
@@ -53,7 +59,15 @@ def _parse_scenario(data: dict) -> ScenarioConfig:
     sc = data.get("scenario", data)
 
     # Prompts
-    prompts = dict(sc.get("prompts", {}))
+    prompts_raw = dict(sc.get("prompts", {}))
+    prompts = {}
+    for k, v in prompts_raw.items():
+        # YAML can coerce unquoted yes/no keys to booleans.
+        if isinstance(k, bool):
+            key = "yes" if k else "no"
+        else:
+            key = str(k).strip()
+        prompts[key] = v
 
     # STT config
     stt_raw = sc.get("stt", {})
