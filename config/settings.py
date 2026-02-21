@@ -90,6 +90,8 @@ class DialerSettings:
     static_contacts: List[str]
     batch_size: int
     default_retry: int
+    max_concurrent_inbound_calls: int
+    max_concurrent_outbound_calls: int
 
 
 @dataclass
@@ -190,6 +192,8 @@ def get_settings() -> Settings:
         static_contacts=_parse_list(os.getenv("STATIC_CONTACTS", "")),
         batch_size=int(os.getenv("DIALER_BATCH_SIZE", os.getenv("MAX_CALLS_PER_MINUTE", "10"))),
         default_retry=int(os.getenv("DIALER_DEFAULT_RETRY", "60")),
+        max_concurrent_inbound_calls=int(os.getenv("MAX_CONCURRENT_INBOUND_CALLS", "0")),
+        max_concurrent_outbound_calls=int(os.getenv("MAX_CONCURRENT_OUTBOUND_CALLS", "0")),
     )
 
     operator = OperatorSettings(
