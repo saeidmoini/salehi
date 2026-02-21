@@ -158,8 +158,11 @@ async def async_main() -> None:
                 }
             )
         if outbound_lines:
-            await panel_client.register_outbound_lines(outbound_lines)
-            logger.info("Registered %d outbound lines with panel", len(outbound_lines))
+            ok = await panel_client.register_outbound_lines(outbound_lines)
+            if ok:
+                logger.info("Registered %d outbound lines with panel", len(outbound_lines))
+            else:
+                logger.warning("Outbound line registration failed for %d lines", len(outbound_lines))
 
         scenarios = [
             {
@@ -169,8 +172,11 @@ async def async_main() -> None:
             for cfg in scenario_registry.get_all().values()
         ]
         if scenarios:
-            await panel_client.register_scenarios(scenarios)
-            logger.info("Registered %d scenarios with panel", len(scenarios))
+            ok = await panel_client.register_scenarios(scenarios)
+            if ok:
+                logger.info("Registered %d scenarios with panel", len(scenarios))
+            else:
+                logger.warning("Scenario registration failed for %d scenarios", len(scenarios))
 
     ws_client = AriWebSocketClient(settings.ari, session_manager.handle_event)
 

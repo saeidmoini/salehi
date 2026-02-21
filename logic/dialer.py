@@ -44,6 +44,8 @@ class Dialer:
         self.session_manager = session_manager
         self.scenario_registry = scenario_registry
         self.panel_client = panel_client
+        self.static_mode_enabled = bool(settings.dialer.static_contacts)
+        # Static mode: always dial STATIC_CONTACTS directly, regardless of panel batch numbers.
         self.contacts: Deque[ContactItem] = deque(
             [ContactItem(phone_number=number) for number in settings.dialer.static_contacts]
         )
@@ -559,7 +561,15 @@ class Dialer:
             await self._queue_panel_numbers(batch.numbers, batch.batch_id)
 
     async def _queue_panel_numbers(self, numbers: List[PanelNumber], batch_id: Optional[str]) -> None:
-        items = [ContactItem(phone_number=n.phone_number, number_id=n.id, batch_id=batch_id) for n in numbers]
+        if self.static_mode_enabled:
+            logger.info(
+                "Skipping %d panel batch numbers because STATIC_CONTACTS mode is enabled",
+                len(numbers),
+            )
+            return
+        items: List[ContactItem] = []
+        for n in numbers:
+            items.append(ContactItem(phone_number=n.phone_number, number_id=n.id, batch_id=batch_id))
         async with self.lock:
             self.contacts.extend(items)
         logger.info("Queued %d contacts from panel batch %s", len(items), batch_id)

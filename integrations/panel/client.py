@@ -204,10 +204,10 @@ class PanelClient:
             async with self.lock:
                 self.pending_reports.append(payload)
 
-    async def register_scenarios(self, scenarios: List[dict]) -> None:
+    async def register_scenarios(self, scenarios: List[dict]) -> bool:
         """Register available scenarios with the panel."""
         if not scenarios:
-            return
+            return False
         payload = {"scenarios": scenarios}
         if self.company:
             payload["company"] = self.company
@@ -215,25 +215,29 @@ class PanelClient:
             resp = await self.client.post("/api/dialer/register-scenarios", json=payload)
             resp.raise_for_status()
             logger.info("Registered scenarios with panel: %s", scenarios)
+            return True
         except Exception as exc:
             logger.warning("Failed to register scenarios with panel: %s", exc)
+            return False
 
-    async def register_outbound_lines(self, lines: List[dict]) -> None:
+    async def register_outbound_lines(self, lines: List[dict]) -> bool:
         """
         Register outbound lines with the panel.
-        Payload: { company, lines: [{phone_number, display_name}] }
+        Payload: { company, outbound_lines: [{phone_number, display_name}] }
         """
         if not lines:
-            return
-        payload = {"lines": lines}
+            return False
+        payload = {"outbound_lines": lines}
         if self.company:
             payload["company"] = self.company
         try:
             resp = await self.client.post("/api/dialer/register-outbound-lines", json=payload)
             resp.raise_for_status()
             logger.info("Registered outbound lines with panel: %s", lines)
+            return True
         except Exception as exc:
             logger.warning("Failed to register outbound lines with panel: %s", exc)
+            return False
 
     async def flush_pending(self) -> None:
         async with self.lock:
