@@ -18,6 +18,17 @@ def _parse_flow_steps(raw_steps: list) -> List[FlowStep]:
     """Parse a list of raw YAML dicts into FlowStep objects."""
     steps = []
     for raw in raw_steps:
+        raw_routes = raw.get("routes")
+        routes = None
+        if isinstance(raw_routes, dict):
+            routes = {}
+            for k, v in raw_routes.items():
+                # YAML can coerce unquoted yes/no keys to booleans.
+                if isinstance(k, bool):
+                    key = "yes" if k else "no"
+                else:
+                    key = str(k).strip()
+                routes[key] = v
         steps.append(FlowStep(
             step=raw["step"],
             type=raw["type"],
@@ -25,7 +36,7 @@ def _parse_flow_steps(raw_steps: list) -> List[FlowStep]:
             prompt=raw.get("prompt"),
             on_empty=raw.get("on_empty"),
             on_failure=raw.get("on_failure"),
-            routes=raw.get("routes"),
+            routes=routes,
             counter=raw.get("counter"),
             max_count=raw.get("max_count"),
             within_limit=raw.get("within_limit"),
@@ -54,10 +65,20 @@ def _parse_scenario(data: dict) -> ScenarioConfig:
 
     # LLM config
     llm_raw = sc.get("llm", {})
+    fallback_tokens_raw = dict(llm_raw.get("fallback_tokens", {}))
+    fallback_tokens: dict[str, list] = {}
+    for k, v in fallback_tokens_raw.items():
+        # YAML can coerce unquoted yes/no keys to booleans.
+        if isinstance(k, bool):
+            key = "yes" if k else "no"
+        else:
+            key = str(k).strip()
+        fallback_tokens[key] = list(v or [])
+
     llm = LLMConfig(
         prompt_template=llm_raw.get("prompt_template", ""),
         intent_categories=llm_raw.get("intent_categories", ["yes", "no", "number_question", "unknown"]),
-        fallback_tokens=dict(llm_raw.get("fallback_tokens", {})),
+        fallback_tokens=fallback_tokens,
     )
 
     # Flows

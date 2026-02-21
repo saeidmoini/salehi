@@ -496,7 +496,13 @@ class FlowEngine(BaseScenario):
 
     # -- Step implementations ----------------------------------------------
 
-    async def _play_prompt(self, session: Session, prompt_key: str, scenario: Optional[ScenarioConfig] = None) -> Optional[str]:
+    async def _play_prompt(
+        self,
+        session: Session,
+        prompt_key: str,
+        scenario: Optional[ScenarioConfig] = None,
+        track_for_flow: bool = True,
+    ) -> Optional[str]:
         async with session.lock:
             if session.metadata.get("hungup") == "1":
                 return
@@ -518,7 +524,7 @@ class FlowEngine(BaseScenario):
             logger.warning("Failed to play %s on %s for session %s: %s", prompt_key, channel_id, session.session_id, exc)
             return None
         playback_id = playback.get("id")
-        if playback_id:
+        if playback_id and track_for_flow:
             async with session.lock:
                 session.playbacks[playback_id] = prompt_key
             await self.session_manager.register_playback(session.session_id, playback_id)
@@ -642,7 +648,12 @@ class FlowEngine(BaseScenario):
         processing_playback_id = None
         if step.prompt:
             # Optional "processing" voice while LLM intent classification runs.
-            processing_playback_id = await self._play_prompt(session, step.prompt, scenario)
+            processing_playback_id = await self._play_prompt(
+                session,
+                step.prompt,
+                scenario,
+                track_for_flow=False,
+            )
 
         async with session.lock:
             transcript = session.metadata.get("last_transcript", "")

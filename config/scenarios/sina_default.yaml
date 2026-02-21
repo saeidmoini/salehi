@@ -130,7 +130,7 @@ scenario:
       - "number_question"
       - "unknown"
     fallback_tokens:
-      yes:
+      "yes":
         - "بله"
         - "آره"
         - "اوکی"
@@ -150,7 +150,7 @@ scenario:
         - "وصل کنید"
         - "آنلاینه"
         - "افلاینه"
-      no:
+      "no":
         - "نه"
         - "نیاز ندارم"
         - "نمیخواهم"
@@ -191,8 +191,8 @@ scenario:
     - step: route
       type: route_by_intent
       routes:
-        yes: handle_yes
-        no: handle_no
+        "yes": handle_yes
+        "no": handle_no
         number_question: handle_number
         unknown: handle_unknown
 
