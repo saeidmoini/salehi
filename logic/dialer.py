@@ -507,9 +507,7 @@ class Dialer:
         if now < self.next_panel_poll:
             return
 
-        capacity = await self._available_capacity()
-        size = min(self.settings.dialer.batch_size, max(1, capacity))
-        batch: NextBatchResponse = await self.panel_client.get_next_batch(size=size)
+        batch: NextBatchResponse = await self.panel_client.get_next_batch()
 
         # Outbound lines now come from panel in each batch response.
         await self._update_outbound_lines(batch.outbound_lines)

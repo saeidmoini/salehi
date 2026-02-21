@@ -89,7 +89,7 @@ class PanelClient:
             params.update(extra)
         return params
 
-    async def get_next_batch(self, size: int) -> NextBatchResponse:
+    async def get_next_batch(self, size: Optional[int] = None) -> NextBatchResponse:
         empty = NextBatchResponse(
             call_allowed=False,
             retry_after_seconds=self.default_retry,
@@ -99,7 +99,10 @@ class PanelClient:
         )
         try:
             await self.flush_pending()
-            params = self._company_params({"size": size})
+            extra: dict = {}
+            if size is not None:
+                extra["size"] = size
+            params = self._company_params(extra)
             resp = await self.client.get("/api/dialer/next-batch", params=params)
             resp.raise_for_status()
             data = resp.json()
