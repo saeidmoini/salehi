@@ -184,6 +184,7 @@ scenario:
 
     - step: classify
       type: classify_intent
+      prompt: alo
       next: route
       on_failure: hangup_failed
 

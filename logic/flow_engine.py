@@ -496,7 +496,7 @@ class FlowEngine(BaseScenario):
 
     # -- Step implementations ----------------------------------------------
 
-    async def _play_prompt(self, session: Session, prompt_key: str, scenario: Optional[ScenarioConfig] = None) -> None:
+    async def _play_prompt(self, session: Session, prompt_key: str, scenario: Optional[ScenarioConfig] = None) -> Optional[str]:
         async with session.lock:
             if session.metadata.get("hungup") == "1":
                 return
@@ -511,18 +511,19 @@ class FlowEngine(BaseScenario):
         channel_id = self._customer_channel_id(session)
         if not channel_id:
             logger.warning("No customer channel to play %s for session %s", prompt_key, session.session_id)
-            return
+            return None
         try:
             playback = await self.ari_client.play_on_channel(channel_id, media)
         except Exception as exc:
             logger.warning("Failed to play %s on %s for session %s: %s", prompt_key, channel_id, session.session_id, exc)
-            return
+            return None
         playback_id = playback.get("id")
         if playback_id:
             async with session.lock:
                 session.playbacks[playback_id] = prompt_key
             await self.session_manager.register_playback(session.session_id, playback_id)
         logger.info("Playing prompt %s on channel %s", prompt_key, channel_id)
+        return playback_id
 
     async def _play_onhold(self, session: Session) -> None:
         scenario = self._get_scenario(session)
@@ -638,9 +639,19 @@ class FlowEngine(BaseScenario):
 
     async def _classify_intent_step(self, session: Session, step, scenario: ScenarioConfig, inbound: bool) -> None:
         """Classify the last transcript using LLM, store intent."""
+        processing_playback_id = None
+        if step.prompt:
+            # Optional "processing" voice while LLM intent classification runs.
+            processing_playback_id = await self._play_prompt(session, step.prompt, scenario)
+
         async with session.lock:
             transcript = session.metadata.get("last_transcript", "")
         if not transcript:
+            if processing_playback_id:
+                try:
+                    await self.ari_client.stop_playback(processing_playback_id)
+                except Exception:
+                    pass
             if step.on_failure:
                 fail_step = scenario.get_step(step.on_failure, inbound=inbound)
                 if fail_step:
@@ -671,6 +682,12 @@ class FlowEngine(BaseScenario):
             self.negative_logger.info("session=%s transcript=%s", session.session_id, transcript)
         else:
             self.unknown_logger.info("session=%s intent=%s transcript=%s", session.session_id, intent, transcript)
+
+        if processing_playback_id:
+            try:
+                await self.ari_client.stop_playback(processing_playback_id)
+            except Exception:
+                pass
 
         if step.next:
             next_step = scenario.get_step(step.next, inbound=inbound)
@@ -714,34 +731,47 @@ class FlowEngine(BaseScenario):
     async def _detect_intent(self, transcript: str, scenario: ScenarioConfig) -> str:
         """Detect intent using LLM with fallback to token matching."""
         text = transcript.lower()
+        text_compact = text.replace("\u200c", "").replace(" ", "")
 
         # Fast-path for clear yes tokens
-        for token in ("بله", "آره"):
-            if token in transcript:
+        for token in ("بله", "بلی", "بلى", "آره", "اره", "حتما", "حتماً"):
+            if token in text or token in text_compact:
                 return "yes"
 
         if self.llm_client.api_key:
             llm_config = scenario.llm
+            yes_examples = llm_config.fallback_tokens.get("yes", [])[:30]
+            no_examples = llm_config.fallback_tokens.get("no", [])[:20]
+            number_q_examples = llm_config.fallback_tokens.get("number_question", [
+                "شماره منو از کجا آوردی", "شماره منو از کجا آوردین",
+            ])
+
+            default_prompt = (
+                "Classify intent into one word: yes / no / number_question / unknown.\n"
+                "YES = interest or any question about price/place/time/links.\n"
+                f"Examples YES: {'; '.join(yes_examples)}.\n"
+                f"NO = reject/decline. Examples NO: {'; '.join(no_examples)}.\n"
+                f"NUMBER_QUESTION = asks where we got their number. Examples: {'; '.join(number_q_examples)}.\n"
+                f"User: {transcript}"
+            )
             if llm_config.prompt_template:
-                prompt = llm_config.prompt_template.format(
-                    transcript=transcript,
-                    intent_categories=", ".join(llm_config.intent_categories),
-                )
+                try:
+                    prompt = llm_config.prompt_template.format(
+                        transcript=transcript,
+                        intent_categories=", ".join(llm_config.intent_categories),
+                        yes_examples="; ".join(yes_examples),
+                        no_examples="; ".join(no_examples),
+                        number_question_examples="; ".join(number_q_examples),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to format LLM prompt template for scenario '%s': %s. Using default prompt.",
+                        scenario.name,
+                        exc,
+                    )
+                    prompt = default_prompt
             else:
-                # Default prompt
-                yes_examples = llm_config.fallback_tokens.get("yes", [])[:30]
-                no_examples = llm_config.fallback_tokens.get("no", [])[:20]
-                number_q_examples = llm_config.fallback_tokens.get("number_question", [
-                    "شماره منو از کجا آوردی", "شماره منو از کجا آوردین",
-                ])
-                prompt = (
-                    "Classify intent into one word: yes / no / number_question / unknown.\n"
-                    "YES = interest or any question about price/place/time/links.\n"
-                    f"Examples YES: {'; '.join(yes_examples)}.\n"
-                    f"NO = reject/decline. Examples NO: {'; '.join(no_examples)}.\n"
-                    f"NUMBER_QUESTION = asks where we got their number. Examples: {'; '.join(number_q_examples)}.\n"
-                    f"User: {transcript}"
-                )
+                prompt = default_prompt
 
             try:
                 result = await self.llm_client.chat(
