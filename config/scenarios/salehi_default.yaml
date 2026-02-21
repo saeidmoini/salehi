@@ -187,7 +187,7 @@ scenario:
 
     - step: result_connected
       type: set_result
-      result: connected_to_operator
+      result: disconnected
       next: do_disconnect
 
     - step: handle_no
