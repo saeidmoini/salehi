@@ -1,4 +1,6 @@
 venv/
+.venv/
+assets/audio/wav/
 __pycache__/
 .env
 prompt.txt
