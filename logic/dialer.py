@@ -578,7 +578,6 @@ class Dialer:
         if not self.enabled_lines:
             return 0
         available_slots = 0
-        outbound_active_total = 0
         for line in self.enabled_lines:
             stats = self.line_stats.get(line)
             if not stats:
@@ -595,10 +594,4 @@ class Dialer:
             line_slots = min(remaining_concurrency, remaining_per_minute, remaining_daily)
             if line_slots > 0:
                 available_slots += line_slots
-            outbound_active_total += stats["active"]
-
-        # Optional global outbound cap: only apply if >0.
-        if self.settings.dialer.max_concurrent_outbound_calls > 0:
-            remaining_outbound = self.settings.dialer.max_concurrent_outbound_calls - outbound_active_total
-            available_slots = min(available_slots, max(0, remaining_outbound))
         return max(0, available_slots)
