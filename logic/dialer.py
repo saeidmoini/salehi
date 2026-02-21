@@ -471,8 +471,8 @@ class Dialer:
                 logger.warning("Failed to notify panel to pause after failures: %s", exc)
 
     def _schedule_timeout_watch(self, session_id: str) -> None:
-        # If no events arrive (no answer/hangup), mark as missed after origination timeout + buffer.
-        timeout = self.settings.dialer.origination_timeout + 15
+        # If no events arrive (no answer/hangup), mark as missed at origination timeout.
+        timeout = self.settings.dialer.origination_timeout
         task = asyncio.create_task(self._mark_missed_if_no_events(session_id, timeout))
         self.timeout_tasks[session_id] = task
 

@@ -194,7 +194,7 @@ scenario:
         "yes": handle_yes
         "no": handle_no
         number_question: handle_number
-        unknown: handle_unknown
+        unknown: check_unknown_retry
 
     - step: handle_yes
       type: play_prompt
@@ -225,6 +225,37 @@ scenario:
       type: play_prompt
       prompt: number
       next: record_response
+
+    - step: check_unknown_retry
+      type: check_retry_limit
+      counter: unknown_retry_count
+      max_count: 1
+      within_limit: play_repeat
+      exceeded: handle_unknown
+
+    - step: play_repeat
+      type: play_prompt
+      prompt: repeat
+      next: record_response_retry
+
+    - step: record_response_retry
+      type: record
+      next: classify_retry
+      on_empty: hangup_empty
+      on_failure: hangup_failed
+
+    - step: classify_retry
+      type: classify_intent
+      next: route_retry
+      on_failure: hangup_failed
+
+    - step: route_retry
+      type: route_by_intent
+      routes:
+        "yes": handle_yes
+        "no": handle_no
+        number_question: handle_number
+        unknown: handle_unknown
 
     - step: handle_unknown
       type: play_prompt
